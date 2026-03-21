@@ -107,7 +107,8 @@ pub fn dispatch(
     SetPrototypeUnion -> set_union(this, args, state)
     SetPrototypeIntersection -> set_intersection(this, args, state)
     SetPrototypeDifference -> set_difference(this, args, state)
-    SetPrototypeSymmetricDifference -> set_symmetric_difference(this, args, state)
+    SetPrototypeSymmetricDifference ->
+      set_symmetric_difference(this, args, state)
     SetPrototypeIsSubsetOf -> set_is_subset_of(this, args, state)
     SetPrototypeIsSupersetOf -> set_is_superset_of(this, args, state)
     SetPrototypeIsDisjointFrom -> set_is_disjoint_from(this, args, state)
@@ -476,7 +477,8 @@ fn set_is_superset_of(
   case require_set_like(first_arg(args), state) {
     Error(r) -> r
     Ok(#(_other_data, other_keys, state)) -> {
-      let is_superset = list.all(other_keys, fn(key) { dict.has_key(data, key) })
+      let is_superset =
+        list.all(other_keys, fn(key) { dict.has_key(data, key) })
       #(state, Ok(JsBool(is_superset)))
     }
   }
@@ -503,13 +505,12 @@ fn set_is_disjoint_from(
 
 /// ES2024 §24.2.3.15 Set.prototype.values ()
 /// Returns an array of the set's values (simplified — no iterator protocol).
-fn set_values(
-  this: JsValue,
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn set_values(this: JsValue, state: State) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
   let values =
-    list.filter_map(keys, fn(key) { dict.get(data, key) |> result.replace_error(Nil) })
+    list.filter_map(keys, fn(key) {
+      dict.get(data, key) |> result.replace_error(Nil)
+    })
   let #(heap, arr_ref) =
     heap.alloc(
       state.heap,
@@ -604,17 +605,9 @@ fn require_set_like(
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: SetObject(data:, keys:), ..)) ->
           Ok(#(data, keys, state))
-        _ ->
-          Error(frame.type_error(
-            state,
-            "The .has method is not callable",
-          ))
+        _ -> Error(frame.type_error(state, "The .has method is not callable"))
       }
-    _ ->
-      Error(frame.type_error(
-        state,
-        "The .has method is not callable",
-      ))
+    _ -> Error(frame.type_error(state, "The .has method is not callable"))
   }
 }
 

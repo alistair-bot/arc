@@ -4485,7 +4485,8 @@ fn array_to_string(
     JsObject(ref) ->
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: ArrayObject(length:), elements:, ..)) -> {
-          let #(state, result) = join_elements(elements, 0, length, ",", [], state)
+          let #(state, result) =
+            join_elements(elements, 0, length, ",", [], state)
           case result {
             Ok(s) -> #(state, Ok(JsString(s)))
             Error(thrown) -> #(state, Error(thrown))
@@ -4544,10 +4545,7 @@ fn to_locale_string_loop(
 
 /// ES2024 §23.1.3.16 Array.prototype.keys ( )
 /// Returns an array of indices (simplified — no iterator protocol).
-fn array_keys(
-  this: JsValue,
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn array_keys(this: JsValue, state: State) -> #(State, Result(JsValue, JsValue)) {
   case this {
     JsObject(ref) ->
       case heap.read(state.heap, ref) {
@@ -4648,13 +4646,16 @@ fn array_entries(
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: ArrayObject(length:), elements:, ..)) -> {
           let #(heap, pairs) =
-            build_entry_pairs(state.heap, elements, 0, length, state.builtins.array.prototype, [])
-          let #(heap, arr_ref) =
-            common.alloc_array(
-              heap,
-              pairs,
+            build_entry_pairs(
+              state.heap,
+              elements,
+              0,
+              length,
               state.builtins.array.prototype,
+              [],
             )
+          let #(heap, arr_ref) =
+            common.alloc_array(heap, pairs, state.builtins.array.prototype)
           #(State(..state, heap:), Ok(JsObject(arr_ref)))
         }
         _ -> {

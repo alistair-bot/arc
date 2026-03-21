@@ -21,9 +21,9 @@ import arc/vm/value.{
   StringPrototypeSub, StringPrototypeSubstr, StringPrototypeSubstring,
   StringPrototypeSup, StringPrototypeToLocaleLowerCase,
   StringPrototypeToLocaleUpperCase, StringPrototypeToLowerCase,
-  StringPrototypeToString, StringPrototypeToUpperCase, StringPrototypeToWellFormed,
-  StringPrototypeTrim, StringPrototypeTrimEnd, StringPrototypeTrimStart,
-  StringPrototypeValueOf, StringRaw,
+  StringPrototypeToString, StringPrototypeToUpperCase,
+  StringPrototypeToWellFormed, StringPrototypeTrim, StringPrototypeTrimEnd,
+  StringPrototypeTrimStart, StringPrototypeValueOf, StringRaw,
 }
 import gleam/int
 import gleam/list
@@ -162,7 +162,8 @@ pub fn dispatch(
     StringPrototypeBlink -> html_wrap(this, state, "blink")
     StringPrototypeBold -> html_wrap(this, state, "b")
     StringPrototypeFixed -> html_wrap(this, state, "tt")
-    StringPrototypeFontcolor -> html_wrap_attr(this, args, state, "font", "color")
+    StringPrototypeFontcolor ->
+      html_wrap_attr(this, args, state, "font", "color")
     StringPrototypeFontsize -> html_wrap_attr(this, args, state, "font", "size")
     StringPrototypeItalics -> html_wrap(this, state, "i")
     StringPrototypeLink -> html_wrap_attr(this, args, state, "a", "href")
@@ -1831,8 +1832,10 @@ fn html_wrap(
   tag: String,
 ) -> #(State, Result(JsValue, JsValue)) {
   case coerce_to_string(this, state) {
-    Ok(#(s, state)) ->
-      #(state, Ok(JsString("<" <> tag <> ">" <> s <> "</" <> tag <> ">")))
+    Ok(#(s, state)) -> #(
+      state,
+      Ok(JsString("<" <> tag <> ">" <> s <> "</" <> tag <> ">")),
+    )
     Error(#(thrown, state)) -> #(state, Error(thrown))
   }
 }
@@ -1847,13 +1850,9 @@ fn html_wrap_attr(
 ) -> #(State, Result(JsValue, JsValue)) {
   case coerce_to_string(this, state) {
     Ok(#(s, state)) -> {
-      use attr_val, state <- frame.try_to_string(
-        state,
-        helpers.first_arg(args),
-      )
+      use attr_val, state <- frame.try_to_string(state, helpers.first_arg(args))
       // Escape quotes in attribute value per spec
-      let escaped =
-        string.replace(attr_val, "\"", "&quot;")
+      let escaped = string.replace(attr_val, "\"", "&quot;")
       #(
         state,
         Ok(JsString(

@@ -5381,7 +5381,10 @@ fn call_native_promise_all(
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   // 1. Create result promise capability
   let #(h, promise_ref, data_ref) =
-    builtins_promise.create_promise(state.heap, state.builtins.promise.prototype)
+    builtins_promise.create_promise(
+      state.heap,
+      state.builtins.promise.prototype,
+    )
   let #(h, cap_resolve, cap_reject) =
     builtins_promise.create_resolving_functions(
       h,
@@ -5399,11 +5402,7 @@ fn call_native_promise_all(
     Error(msg) -> {
       let #(h, err) = common.make_type_error(h, state.builtins, msg)
       let state =
-        builtins_promise.reject_promise(
-          State(..state, heap: h),
-          data_ref,
-          err,
-        )
+        builtins_promise.reject_promise(State(..state, heap: h), data_ref, err)
       Ok(
         State(
           ..state,
@@ -5553,7 +5552,10 @@ fn call_native_promise_race(
   rest_stack: List(JsValue),
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   let #(h, promise_ref, data_ref) =
-    builtins_promise.create_promise(state.heap, state.builtins.promise.prototype)
+    builtins_promise.create_promise(
+      state.heap,
+      state.builtins.promise.prototype,
+    )
   let #(h, cap_resolve, cap_reject) =
     builtins_promise.create_resolving_functions(
       h,
@@ -5570,11 +5572,7 @@ fn call_native_promise_race(
     Error(msg) -> {
       let #(h, err) = common.make_type_error(h, state.builtins, msg)
       let state =
-        builtins_promise.reject_promise(
-          State(..state, heap: h),
-          data_ref,
-          err,
-        )
+        builtins_promise.reject_promise(State(..state, heap: h), data_ref, err)
       Ok(
         State(
           ..state,
@@ -5586,8 +5584,7 @@ fn call_native_promise_race(
     Ok(#(h, elements)) -> {
       // For each element: Promise.resolve(elem).then(resolve, reject)
       let state = State(..state, heap: h)
-      let state =
-        promise_race_loop(state, elements, cap_resolve, cap_reject)
+      let state = promise_race_loop(state, elements, cap_resolve, cap_reject)
       Ok(
         State(
           ..state,
@@ -5609,13 +5606,7 @@ fn promise_race_loop(
   case elements {
     [] -> state
     [elem, ..rest] -> {
-      let state =
-        promise_resolve_and_then(
-          state,
-          elem,
-          cap_resolve,
-          cap_reject,
-        )
+      let state = promise_resolve_and_then(state, elem, cap_resolve, cap_reject)
       promise_race_loop(state, rest, cap_resolve, cap_reject)
     }
   }
@@ -5632,7 +5623,10 @@ fn call_native_promise_all_settled(
   rest_stack: List(JsValue),
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   let #(h, promise_ref, data_ref) =
-    builtins_promise.create_promise(state.heap, state.builtins.promise.prototype)
+    builtins_promise.create_promise(
+      state.heap,
+      state.builtins.promise.prototype,
+    )
   let #(h, cap_resolve, _cap_reject) =
     builtins_promise.create_resolving_functions(
       h,
@@ -5649,11 +5643,7 @@ fn call_native_promise_all_settled(
     Error(msg) -> {
       let #(h, err) = common.make_type_error(h, state.builtins, msg)
       let state =
-        builtins_promise.reject_promise(
-          State(..state, heap: h),
-          data_ref,
-          err,
-        )
+        builtins_promise.reject_promise(State(..state, heap: h), data_ref, err)
       Ok(
         State(
           ..state,
@@ -5820,7 +5810,10 @@ fn call_native_promise_any(
   rest_stack: List(JsValue),
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   let #(h, promise_ref, data_ref) =
-    builtins_promise.create_promise(state.heap, state.builtins.promise.prototype)
+    builtins_promise.create_promise(
+      state.heap,
+      state.builtins.promise.prototype,
+    )
   let #(h, cap_resolve, cap_reject) =
     builtins_promise.create_resolving_functions(
       h,
@@ -5837,11 +5830,7 @@ fn call_native_promise_any(
     Error(msg) -> {
       let #(h, err) = common.make_type_error(h, state.builtins, msg)
       let state =
-        builtins_promise.reject_promise(
-          State(..state, heap: h),
-          data_ref,
-          err,
-        )
+        builtins_promise.reject_promise(State(..state, heap: h), data_ref, err)
       Ok(
         State(
           ..state,
@@ -5856,7 +5845,12 @@ fn call_native_promise_any(
         0 -> {
           // Empty iterable → reject with AggregateError
           let #(h, err) =
-            make_aggregate_error(h, state.builtins, [], "All promises were rejected")
+            make_aggregate_error(
+              h,
+              state.builtins,
+              [],
+              "All promises were rejected",
+            )
           let state =
             builtins_promise.reject_promise(
               State(..state, heap: h),
@@ -5998,10 +5992,7 @@ fn promise_resolve_and_then(
         Some(elem_data_ref) -> {
           // Create child promise for the .then chain
           let #(h, child_ref, child_data_ref) =
-            builtins_promise.create_promise(
-              h,
-              state.builtins.promise.prototype,
-            )
+            builtins_promise.create_promise(h, state.builtins.promise.prototype)
           let #(h, child_resolve, child_reject) =
             builtins_promise.create_resolving_functions(
               h,
@@ -6044,10 +6035,7 @@ fn promise_resolve_and_then(
             )
           // Create child for .then
           let #(h, child_ref, child_data_ref) =
-            builtins_promise.create_promise(
-              h,
-              state.builtins.promise.prototype,
-            )
+            builtins_promise.create_promise(h, state.builtins.promise.prototype)
           let #(h, child_resolve, child_reject) =
             builtins_promise.create_resolving_functions(
               h,
@@ -6102,10 +6090,7 @@ fn promise_resolve_and_then(
             builtins_promise.fulfill_promise(state.heap, wrap_data_ref, elem)
           // Now attach .then
           let #(h, child_ref, child_data_ref) =
-            builtins_promise.create_promise(
-              h,
-              state.builtins.promise.prototype,
-            )
+            builtins_promise.create_promise(h, state.builtins.promise.prototype)
           let #(h, child_resolve, child_reject) =
             builtins_promise.create_resolving_functions(
               h,
@@ -6141,22 +6126,11 @@ fn get_iterable_elements(
     JsObject(ref) ->
       case heap.read(h, ref) {
         Some(ObjectSlot(kind: ArrayObject(length:), elements:, ..))
-        | Some(ObjectSlot(
-            kind: value.ArgumentsObject(length:),
-            elements:,
-            ..,
-          )) -> Ok(#(h, extract_elements_loop(elements, 0, length, [])))
-        _ ->
-          Error(
-            object.inspect(iterable, h)
-              <> " is not iterable",
-          )
+        | Some(ObjectSlot(kind: value.ArgumentsObject(length:), elements:, ..)) ->
+          Ok(#(h, extract_elements_loop(elements, 0, length, [])))
+        _ -> Error(object.inspect(iterable, h) <> " is not iterable")
       }
-    _ ->
-      Error(
-        object.inspect(iterable, h)
-          <> " is not iterable",
-      )
+    _ -> Error(object.inspect(iterable, h) <> " is not iterable")
   }
 }
 
@@ -6174,13 +6148,7 @@ fn call_native_promise_all_resolve_element(
   // Check and set already-called flag
   case heap.read(state.heap, already_called_ref) {
     Some(value.BoxSlot(value: JsBool(True))) ->
-      Ok(
-        State(
-          ..state,
-          stack: [JsUndefined, ..rest_stack],
-          pc: state.pc + 1,
-        ),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     _ -> {
       let h =
         heap.write(
@@ -6202,9 +6170,7 @@ fn call_native_promise_all_resolve_element(
           values_ref,
           resolve,
         )
-      Ok(
-        State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     }
   }
 }
@@ -6222,13 +6188,7 @@ fn call_native_promise_all_settled_resolve_element(
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   case heap.read(state.heap, already_called_ref) {
     Some(value.BoxSlot(value: JsBool(True))) ->
-      Ok(
-        State(
-          ..state,
-          stack: [JsUndefined, ..rest_stack],
-          pc: state.pc + 1,
-        ),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     _ -> {
       let h =
         heap.write(
@@ -6254,9 +6214,7 @@ fn call_native_promise_all_settled_resolve_element(
           values_ref,
           resolve,
         )
-      Ok(
-        State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     }
   }
 }
@@ -6274,13 +6232,7 @@ fn call_native_promise_all_settled_reject_element(
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   case heap.read(state.heap, already_called_ref) {
     Some(value.BoxSlot(value: JsBool(True))) ->
-      Ok(
-        State(
-          ..state,
-          stack: [JsUndefined, ..rest_stack],
-          pc: state.pc + 1,
-        ),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     _ -> {
       let h =
         heap.write(
@@ -6306,9 +6258,7 @@ fn call_native_promise_all_settled_reject_element(
           values_ref,
           resolve,
         )
-      Ok(
-        State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     }
   }
 }
@@ -6326,13 +6276,7 @@ fn call_native_promise_any_reject_element(
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   case heap.read(state.heap, already_called_ref) {
     Some(value.BoxSlot(value: JsBool(True))) ->
-      Ok(
-        State(
-          ..state,
-          stack: [JsUndefined, ..rest_stack],
-          pc: state.pc + 1,
-        ),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     _ -> {
       let h =
         heap.write(
@@ -6352,9 +6296,7 @@ fn call_native_promise_any_reject_element(
           errors_ref,
           reject,
         )
-      Ok(
-        State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     }
   }
 }
@@ -6423,9 +6365,7 @@ fn promise_any_decrement_and_maybe_reject(
               "All promises were rejected",
             )
           let state = State(..state, heap: h)
-          case
-            run_handler_with_this(state, reject, JsUndefined, [err])
-          {
+          case run_handler_with_this(state, reject, JsUndefined, [err]) {
             Ok(#(_, after_state)) -> after_state
             Error(#(_, after_state)) -> after_state
           }

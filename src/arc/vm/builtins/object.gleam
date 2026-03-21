@@ -80,11 +80,7 @@ pub fn init(
       #("toString", ObjectNative(ObjectPrototypeToString), 0),
       #("valueOf", ObjectNative(ObjectPrototypeValueOf), 0),
       #("isPrototypeOf", ObjectNative(value.ObjectPrototypeIsPrototypeOf), 1),
-      #(
-        "toLocaleString",
-        ObjectNative(value.ObjectPrototypeToLocaleString),
-        0,
-      ),
+      #("toLocaleString", ObjectNative(value.ObjectPrototypeToLocaleString), 0),
     ])
   common.init_type_on(
     h,
@@ -2586,8 +2582,7 @@ fn is_prototype_of(
     JsObject(v_ref) -> {
       // Step 2: Let O be ? ToObject(this value).
       case this {
-        JsObject(this_ref) ->
-          is_prototype_of_loop(state, v_ref, this_ref)
+        JsObject(this_ref) -> is_prototype_of_loop(state, v_ref, this_ref)
         _ -> #(state, Ok(JsBool(False)))
       }
     }
@@ -2629,7 +2624,10 @@ fn object_to_locale_string(
                 Error(#(thrown, state)) -> #(state, Error(thrown))
               }
             False ->
-              frame.type_error(state, "toLocaleString: toString is not callable")
+              frame.type_error(
+                state,
+                "toLocaleString: toString is not callable",
+              )
           }
         Error(#(thrown, state)) -> #(state, Error(thrown))
       }
@@ -2662,7 +2660,8 @@ fn group_by(
               let elems = extract_elements(elements, 0, length, [])
               group_by_loop(state, elems, callback, 0, dict.new())
             }
-            _ -> frame.type_error(state, "Object.groupBy: items is not iterable")
+            _ ->
+              frame.type_error(state, "Object.groupBy: items is not iterable")
           }
         _ -> frame.type_error(state, "Object.groupBy: items is not iterable")
       }
@@ -2685,7 +2684,11 @@ fn group_by_loop(
           let #(h, ps) = acc
           let #(key, values) = entry
           let #(h, arr_ref) =
-            common.alloc_array(h, list.reverse(values), state.builtins.array.prototype)
+            common.alloc_array(
+              h,
+              list.reverse(values),
+              state.builtins.array.prototype,
+            )
           #(h, [#(key, value.builtin_property(JsObject(arr_ref))), ..ps])
         })
       let #(heap, obj_ref) =
@@ -2704,12 +2707,10 @@ fn group_by_loop(
     }
     [item, ..rest] -> {
       case
-        frame.call(
-          state,
-          callback,
-          JsUndefined,
-          [item, value.JsNumber(value.Finite(int.to_float(index)))],
-        )
+        frame.call(state, callback, JsUndefined, [
+          item,
+          value.JsNumber(value.Finite(int.to_float(index))),
+        ])
       {
         Ok(#(key_val, state)) -> {
           use key, state <- frame.try_to_string(state, key_val)

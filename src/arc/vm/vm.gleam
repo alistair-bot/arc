@@ -5983,12 +5983,10 @@ fn create_iterator_result(
 /// Drain jobs, using the event loop if enabled on the state, otherwise
 /// just flushing the microtask queue.
 fn finish(state: State) -> State {
-  let state = case state.event_loop {
+  case state.event_loop {
     True -> run_event_loop(state)
     False -> drain_jobs(state)
   }
-  report_unhandled_rejections(state)
-  state
 }
 
 /// Print warnings for any promises that were rejected without a handler.
@@ -6007,10 +6005,14 @@ fn report_unhandled_rejections(state: State) -> Nil {
 }
 
 /// Drain all jobs in the job queue, processing any new jobs that get enqueued
-/// during execution. Loops until the queue is empty.
+/// during execution. Loops until the queue is empty. When empty, reports any
+/// unhandled promise rejections (like Node.js checking after each microtask flush).
 fn drain_jobs(state: State) -> State {
   case state.job_queue {
-    [] -> state
+    [] -> {
+      report_unhandled_rejections(state)
+      state
+    }
     [job, ..rest] -> {
       let state = State(..state, job_queue: rest)
       let state = execute_job(state, job)

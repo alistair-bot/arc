@@ -1370,7 +1370,18 @@ fn inspect_object(
           }
           "/" <> source <> "/" <> flags
         }
-        OrdinaryObject -> inspect_plain_object(heap, properties, depth, visited)
+        OrdinaryObject ->
+          case dict.get(properties, "message") {
+            // Error objects: display as "ErrorName: message"
+            Ok(DataProperty(value: JsString(msg), ..)) -> {
+              let name = case dict.get(properties, "name") {
+                Ok(DataProperty(value: JsString(n), ..)) -> n
+                _ -> inspect_error_name(heap, ref)
+              }
+              name <> ": " <> msg
+            }
+            _ -> inspect_plain_object(heap, properties, depth, visited)
+          }
       }
     _ -> "[Object]"
   }
@@ -1430,5 +1441,21 @@ fn inspect_plain_object(
   case entries {
     [] -> "{}"
     _ -> "{ " <> string.join(entries, ", ") <> " }"
+  }
+}
+
+/// Walk the prototype chain to find the "name" property for error display.
+fn inspect_error_name(heap: Heap, ref: value.Ref) -> String {
+  case heap.read(heap, ref) {
+    Some(ObjectSlot(prototype: Some(proto_ref), ..)) ->
+      case heap.read(heap, proto_ref) {
+        Some(ObjectSlot(properties: proto_props, ..)) ->
+          case dict.get(proto_props, "name") {
+            Ok(DataProperty(value: JsString(n), ..)) -> n
+            _ -> "Error"
+          }
+        _ -> "Error"
+      }
+    _ -> "Error"
   }
 }

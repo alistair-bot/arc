@@ -53,6 +53,7 @@ import gleam/bool
 import gleam/dict
 import gleam/float
 import gleam/int
+import gleam/io
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/order
@@ -164,6 +165,7 @@ fn new_state(
     callee_ref: None,
     call_args: [],
     job_queue: [],
+    unhandled_rejections: [],
     pending_receivers: [],
     outstanding: 0,
     symbol_descriptions:,
@@ -3039,19 +3041,25 @@ fn call_async_function(
             saved_callee_ref: suspended.callee_ref,
           ),
         )
-      let #(h2, jobs) =
-        async_setup_await(h2, state.builtins, async_data_ref, awaited_value)
+      let state =
+        async_setup_await(
+          State(
+            ..state,
+            heap: h2,
+            lexical_globals: suspended.lexical_globals,
+            const_lexical_globals: suspended.const_lexical_globals,
+            job_queue: suspended.job_queue,
+            pending_receivers: suspended.pending_receivers,
+            outstanding: suspended.outstanding,
+          ),
+          async_data_ref,
+          awaited_value,
+        )
       Ok(
         State(
           ..state,
-          heap: h2,
           stack: [JsObject(promise_ref), ..rest_stack],
           pc: state.pc + 1,
-          lexical_globals: suspended.lexical_globals,
-          const_lexical_globals: suspended.const_lexical_globals,
-          job_queue: list.append(suspended.job_queue, jobs),
-          pending_receivers: suspended.pending_receivers,
-          outstanding: suspended.outstanding,
         ),
       )
     }
@@ -3075,18 +3083,24 @@ fn call_async_function(
     }
     Ok(#(ThrowCompletion(thrown, h2), final_state)) -> {
       // Async function threw without awaiting — reject the promise
-      let #(h2, jobs) = builtins_promise.reject_promise(h2, data_ref, thrown)
+      let state =
+        builtins_promise.reject_promise(
+          State(
+            ..state,
+            heap: h2,
+            lexical_globals: final_state.lexical_globals,
+            const_lexical_globals: final_state.const_lexical_globals,
+            pending_receivers: final_state.pending_receivers,
+            outstanding: final_state.outstanding,
+          ),
+          data_ref,
+          thrown,
+        )
       Ok(
         State(
           ..state,
-          heap: h2,
           stack: [JsObject(promise_ref), ..rest_stack],
           pc: state.pc + 1,
-          lexical_globals: final_state.lexical_globals,
-          const_lexical_globals: final_state.const_lexical_globals,
-          job_queue: list.append(final_state.job_queue, jobs),
-          pending_receivers: final_state.pending_receivers,
-          outstanding: final_state.outstanding,
         ),
       )
     }
@@ -3096,13 +3110,14 @@ fn call_async_function(
 
 /// Set up promise resolution for an awaited value in an async function.
 /// Wraps the value in Promise.resolve(), creates resume callbacks, attaches .then().
-/// Returns the updated heap and any jobs to schedule.
+/// Returns the updated state with heap and job_queue modified.
 fn async_setup_await(
-  h: Heap,
-  builtins: Builtins,
+  state: State,
   async_data_ref: Ref,
   awaited_value: JsValue,
-) -> #(Heap, List(value.Job)) {
+) -> State {
+  let h = state.heap
+  let builtins = state.builtins
   // Wrap awaited_value in Promise.resolve() if not already a promise
   let #(h, promise_data_ref) = case awaited_value {
     JsObject(ref) ->
@@ -3158,7 +3173,7 @@ fn async_setup_await(
       child_data_ref,
     )
   builtins_promise.perform_promise_then(
-    h,
+    State(..state, heap: h),
     promise_data_ref,
     JsObject(fulfill_resume_ref),
     JsObject(reject_resume_ref),
@@ -3252,19 +3267,24 @@ fn call_native_async_resume(
         }
         Ok(#(ThrowCompletion(thrown, h2), final_state)) -> {
           // Async function threw — reject the outer promise
-          let #(h2, jobs) =
-            builtins_promise.reject_promise(h2, promise_data_ref, thrown)
+          let state =
+            builtins_promise.reject_promise(
+              State(
+                ..state,
+                heap: h2,
+                lexical_globals: final_state.lexical_globals,
+                const_lexical_globals: final_state.const_lexical_globals,
+                pending_receivers: final_state.pending_receivers,
+                outstanding: final_state.outstanding,
+              ),
+              promise_data_ref,
+              thrown,
+            )
           Ok(
             State(
               ..state,
-              heap: h2,
               stack: [JsUndefined, ..rest_stack],
               pc: state.pc + 1,
-              lexical_globals: final_state.lexical_globals,
-              const_lexical_globals: final_state.const_lexical_globals,
-              job_queue: list.append(final_state.job_queue, jobs),
-              pending_receivers: final_state.pending_receivers,
-              outstanding: final_state.outstanding,
             ),
           )
         }
@@ -3291,19 +3311,25 @@ fn call_native_async_resume(
                 saved_callee_ref: suspended.callee_ref,
               ),
             )
-          let #(h2, jobs) =
-            async_setup_await(h2, state.builtins, async_data_ref, awaited_value)
+          let state =
+            async_setup_await(
+              State(
+                ..state,
+                heap: h2,
+                lexical_globals: suspended.lexical_globals,
+                const_lexical_globals: suspended.const_lexical_globals,
+                job_queue: suspended.job_queue,
+                pending_receivers: suspended.pending_receivers,
+                outstanding: suspended.outstanding,
+              ),
+              async_data_ref,
+              awaited_value,
+            )
           Ok(
             State(
               ..state,
-              heap: h2,
               stack: [JsUndefined, ..rest_stack],
               pc: state.pc + 1,
-              lexical_globals: suspended.lexical_globals,
-              const_lexical_globals: suspended.const_lexical_globals,
-              job_queue: list.append(suspended.job_queue, jobs),
-              pending_receivers: suspended.pending_receivers,
-              outstanding: suspended.outstanding,
             ),
           )
         }
@@ -4720,15 +4746,13 @@ fn call_native_promise_constructor(
             ),
           )
         Error(#(thrown, after_state)) -> {
-          let #(h, jobs) =
-            builtins_promise.reject_promise(after_state.heap, data_ref, thrown)
+          let state =
+            builtins_promise.reject_promise(after_state, data_ref, thrown)
           Ok(
             State(
-              ..after_state,
-              heap: h,
+              ..state,
               stack: [JsObject(promise_ref), ..rest_stack],
               pc: state.pc + 1,
-              job_queue: list.append(after_state.job_queue, jobs),
             ),
           )
         }
@@ -4775,15 +4799,18 @@ fn call_native_promise_resolve_fn(
             "Chaining cycle detected for promise",
           )
 
-        let #(h, jobs) = builtins_promise.reject_promise(h, data_ref, err)
+        let state =
+          builtins_promise.reject_promise(
+            State(..state, heap: h),
+            data_ref,
+            err,
+          )
 
         Ok(
           State(
             ..state,
-            heap: h,
             stack: [JsUndefined, ..rest_stack],
             pc: state.pc + 1,
-            job_queue: list.append(state.job_queue, jobs),
           ),
         )
       })
@@ -4821,15 +4848,13 @@ fn call_native_promise_resolve_fn(
 
         Error(#(option.Some(thrown), state)) -> {
           // Getter threw — reject promise with the error (spec 25.6.1.3.2 step 9)
-          let #(h, jobs) =
-            builtins_promise.reject_promise(state.heap, data_ref, thrown)
+          let state =
+            builtins_promise.reject_promise(state, data_ref, thrown)
 
           State(
             ..state,
-            heap: h,
             stack: [JsUndefined, ..rest_stack],
             pc: state.pc + 1,
-            job_queue: list.append(state.job_queue, jobs),
           )
           |> Ok
         }
@@ -4876,14 +4901,17 @@ fn call_native_promise_reject_fn(
           already_resolved_ref,
           value.BoxSlot(value: JsBool(True)),
         )
-      let #(h, jobs) = builtins_promise.reject_promise(h, data_ref, reason)
+      let state =
+        builtins_promise.reject_promise(
+          State(..state, heap: h),
+          data_ref,
+          reason,
+        )
       Ok(
         State(
           ..state,
-          heap: h,
           stack: [JsUndefined, ..rest_stack],
           pc: state.pc + 1,
-          job_queue: list.append(state.job_queue, jobs),
         ),
       )
     }
@@ -4938,9 +4966,9 @@ fn call_native_promise_then(
         )
 
       // Perform the .then logic
-      let #(h, jobs) =
+      let state =
         builtins_promise.perform_promise_then(
-          h,
+          State(..state, heap: h),
           data_ref,
           on_fulfilled,
           on_rejected,
@@ -4951,10 +4979,8 @@ fn call_native_promise_then(
       Ok(
         State(
           ..state,
-          heap: h,
           stack: [JsObject(child_ref), ..rest_stack],
           pc: state.pc + 1,
-          job_queue: list.append(state.job_queue, jobs),
         ),
       )
     }
@@ -5229,15 +5255,13 @@ fn call_native_promise_resolve_static(
         }
         Error(#(option.Some(thrown), state)) -> {
           // Getter threw — reject promise with the error
-          let #(h, jobs) =
-            builtins_promise.reject_promise(state.heap, data_ref, thrown)
+          let state =
+            builtins_promise.reject_promise(state, data_ref, thrown)
           Ok(
             State(
               ..state,
-              heap: h,
               stack: [JsObject(promise_ref), ..rest_stack],
               pc: state.pc + 1,
-              job_queue: list.append(state.job_queue, jobs),
             ),
           )
         }
@@ -5274,14 +5298,17 @@ fn call_native_promise_reject_static(
       state.heap,
       state.builtins.promise.prototype,
     )
-  let #(h, jobs) = builtins_promise.reject_promise(h, data_ref, reason)
+  let state =
+    builtins_promise.reject_promise(
+      State(..state, heap: h),
+      data_ref,
+      reason,
+    )
   Ok(
     State(
       ..state,
-      heap: h,
       stack: [JsObject(promise_ref), ..rest_stack],
       pc: state.pc + 1,
-      job_queue: list.append(state.job_queue, jobs),
     ),
   )
 }
@@ -5986,11 +6013,29 @@ fn create_iterator_result(
 /// Drain jobs, using the event loop if enabled on the state, otherwise
 /// just flushing the microtask queue.
 fn finish(state: State) -> State {
-  case state.event_loop {
+  let state = case state.event_loop {
     True -> run_event_loop(state)
     False -> drain_jobs(state)
   }
+  report_unhandled_rejections(state)
+  state
 }
+
+/// Print warnings for any promises that were rejected without a handler.
+/// Called after all jobs have been drained (like QuickJS's
+/// js_std_promise_rejection_check).
+fn report_unhandled_rejections(state: State) -> Nil {
+  list.each(state.unhandled_rejections, fn(data_ref) {
+    case heap.read(state.heap, data_ref) {
+      Some(value.PromiseSlot(state: value.PromiseRejected(reason), ..)) ->
+        io.println_error(
+          "Uncaught (in promise): " <> object.inspect(reason, state.heap),
+        )
+      _ -> Nil
+    }
+  })
+}
+
 
 /// Drain all jobs in the job queue, processing any new jobs that get enqueued
 /// during execution. Loops until the queue is empty.
@@ -6070,14 +6115,13 @@ fn handle_mailbox_event(state: State, event: value.MailboxEvent) -> State {
     value.SettlePromise(data_ref:, outcome: Error(pm)) -> {
       let #(heap, reason) =
         builtins_arc.deserialize(state.heap, state.builtins, pm)
-      let #(heap, jobs) =
-        builtins_promise.reject_promise(heap, data_ref, reason)
-      State(
-        ..state,
-        heap:,
-        outstanding: state.outstanding - 1,
-        job_queue: list.append(state.job_queue, jobs),
-      )
+      let state =
+        builtins_promise.reject_promise(
+          State(..state, heap:),
+          data_ref,
+          reason,
+        )
+      State(..state, outstanding: state.outstanding - 1)
     }
     value.ReceiverTimeout(data_ref:) ->
       case list.contains(state.pending_receivers, data_ref) {

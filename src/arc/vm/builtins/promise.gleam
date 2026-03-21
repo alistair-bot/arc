@@ -257,14 +257,14 @@ pub fn fulfill_promise(
 ///   9. Return unused.
 ///
 /// Step 1 assertion is a soft check (no-op if not pending).
-/// TODO(Deviation): Step 7 (HostPromiseRejectionTracker) is not yet implemented.
-/// Step 8 is deferred — jobs returned for the VM queue.
+/// Step 7: HostPromiseRejectionTracker — tracks unhandled rejections on State.
+/// Step 8 jobs are appended to state.job_queue.
 pub fn reject_promise(
-  h: Heap,
+  state: frame.State,
   data_ref: Ref,
   reason: JsValue,
-) -> #(Heap, List(Job)) {
-  case heap.read(h, data_ref) {
+) -> frame.State {
+  case heap.read(state.heap, data_ref) {
     Some(PromiseSlot(
       state: value.PromisePending,
       reject_reactions: reactions,
@@ -282,25 +282,31 @@ pub fn reject_promise(
           )
         })
       // Steps 3-6: Transition state to rejected, clear reaction lists
-      // Step 7: TODO — HostPromiseRejectionTracker not implemented
       let h =
         heap.write(
-          h,
+          state.heap,
           data_ref,
           PromiseSlot(
             state: value.PromiseRejected(reason),
-            // Steps 3, 6
             fulfill_reactions: [],
-            // Step 4
             reject_reactions: [],
-            // Step 5
             is_handled:,
           ),
         )
-      #(h, jobs)
+      // Step 7: HostPromiseRejectionTracker(promise, "reject")
+      let unhandled_rejections = case is_handled {
+        False -> [data_ref, ..state.unhandled_rejections]
+        True -> state.unhandled_rejections
+      }
+      frame.State(
+        ..state,
+        heap: h,
+        job_queue: list.append(state.job_queue, jobs),
+        unhandled_rejections:,
+      )
     }
     // Soft assertion: not pending -> no-op (spec says Assert)
-    _ -> #(h, [])
+    _ -> state
   }
 }
 
@@ -339,16 +345,18 @@ pub fn reject_promise(
 ///
 /// Non-callable handlers are replaced with sentinel values (JsUndefined =
 /// identity pass-through, JsNull = thrower pass-through) rather than using
-/// the spec's "empty" concept. Jobs are returned as a list rather than
-/// directly enqueued via HostEnqueuePromiseJob.
+/// the spec's "empty" concept. Jobs are appended to state.job_queue.
+/// Step 8c: HostPromiseRejectionTracker — untracks previously-unhandled
+/// rejections on State when a handler is attached.
 pub fn perform_promise_then(
-  h: Heap,
+  state: frame.State,
   data_ref: Ref,
   on_fulfilled: JsValue,
   on_rejected: JsValue,
   child_resolve: JsValue,
   child_reject: JsValue,
-) -> #(Heap, List(Job)) {
+) -> frame.State {
+  let h = state.heap
   // §27.2.5.4 steps 3-4: If IsCallable(onFulfilled/onRejected) is false,
   // set to undefined. We use sentinel values instead of the spec's "empty".
   let fulfill_handler = case helpers.is_callable(h, on_fulfilled) {
@@ -386,38 +394,52 @@ pub fn perform_promise_then(
             is_handled: True,
           ),
         )
-      #(h, [])
+      frame.State(..state, heap: h)
     }
     // Step 7: Else if promise.[[PromiseState]] is fulfilled
     Some(PromiseSlot(state: value.PromiseFulfilled(val), ..)) -> {
       // Step 9: Set [[PromiseIsHandled]] to true
       let h = mark_handled(h, data_ref)
       // Step 7b-c: NewPromiseReactionJob + HostEnqueuePromiseJob
-      #(h, [
-        value.PromiseReactionJob(
-          handler: fulfill_handler,
-          arg: val,
-          resolve: child_resolve,
-          reject: child_reject,
-        ),
-      ])
+      frame.State(
+        ..state,
+        heap: h,
+        job_queue: list.append(state.job_queue, [
+          value.PromiseReactionJob(
+            handler: fulfill_handler,
+            arg: val,
+            resolve: child_resolve,
+            reject: child_reject,
+          ),
+        ]),
+      )
     }
     // Step 8: Else (rejected)
-    Some(PromiseSlot(state: value.PromiseRejected(reason), ..)) -> {
+    Some(PromiseSlot(state: value.PromiseRejected(reason), is_handled:, ..)) -> {
       // Step 9: Set [[PromiseIsHandled]] to true
-      // Step 8c: TODO — HostPromiseRejectionTracker(promise, "handle")
       let h = mark_handled(h, data_ref)
+      // Step 8c: HostPromiseRejectionTracker(promise, "handle")
+      let unhandled_rejections = case is_handled {
+        False ->
+          list.filter(state.unhandled_rejections, fn(r) { r != data_ref })
+        True -> state.unhandled_rejections
+      }
       // Step 8d-e: NewPromiseReactionJob + HostEnqueuePromiseJob
-      #(h, [
-        value.PromiseReactionJob(
-          handler: reject_handler,
-          arg: reason,
-          resolve: child_resolve,
-          reject: child_reject,
-        ),
-      ])
+      frame.State(
+        ..state,
+        heap: h,
+        job_queue: list.append(state.job_queue, [
+          value.PromiseReactionJob(
+            handler: reject_handler,
+            arg: reason,
+            resolve: child_resolve,
+            reject: child_reject,
+          ),
+        ]),
+        unhandled_rejections:,
+      )
     }
-    _ -> #(h, [])
+    _ -> state
   }
 }
 

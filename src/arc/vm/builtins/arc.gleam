@@ -367,9 +367,9 @@ fn set_timeout_inner(
       state.heap,
       state.builtins.promise.prototype,
     )
-  let #(heap, jobs) =
+  let state =
     builtins_promise.perform_promise_then(
-      heap,
+      State(..state, heap:),
       data_ref,
       callback,
       JsUndefined,
@@ -378,12 +378,7 @@ fn set_timeout_inner(
     )
   ffi_send_after(ms, ffi_self(), SettlePromise(data_ref, Ok(PmUndefined)))
   #(
-    State(
-      ..state,
-      heap:,
-      outstanding: state.outstanding + 1,
-      job_queue: list.append(state.job_queue, jobs),
-    ),
+    State(..state, outstanding: state.outstanding + 1),
     Ok(JsUndefined),
   )
 }

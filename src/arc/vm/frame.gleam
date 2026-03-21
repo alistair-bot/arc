@@ -98,6 +98,10 @@ pub type State {
     /// Promise microtask job queue. Jobs enqueued during promise operations,
     /// drained after script completes.
     job_queue: List(value.Job),
+    /// ES2024 HostPromiseRejectionTracker: data_refs of promises rejected while
+    /// [[PromiseIsHandled]] was false. Removed when a handler is later attached.
+    /// Any remaining after job draining are reported as unhandled rejections.
+    unhandled_rejections: List(Ref),
     /// PromiseSlot data_refs created by `Arc.receiveAsync()` waiting for a
     /// `UserMessage` to arrive. FIFO — first caller gets first message. When
     /// this is empty, the event loop uses selective receive to leave any

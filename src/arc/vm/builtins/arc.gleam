@@ -377,10 +377,7 @@ fn set_timeout_inner(
       JsUndefined,
     )
   ffi_send_after(ms, ffi_self(), SettlePromise(data_ref, Ok(PmUndefined)))
-  #(
-    State(..state, outstanding: state.outstanding + 1),
-    Ok(JsUndefined),
-  )
+  #(State(..state, outstanding: state.outstanding + 1), Ok(JsUndefined))
 }
 
 // -- Arc.self ----------------------------------------------------------------

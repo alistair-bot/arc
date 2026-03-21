@@ -3281,11 +3281,7 @@ fn call_native_async_resume(
               thrown,
             )
           Ok(
-            State(
-              ..state,
-              stack: [JsUndefined, ..rest_stack],
-              pc: state.pc + 1,
-            ),
+            State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1),
           )
         }
         Ok(#(YieldCompletion(awaited_value, h2), suspended)) -> {
@@ -3326,11 +3322,7 @@ fn call_native_async_resume(
               awaited_value,
             )
           Ok(
-            State(
-              ..state,
-              stack: [JsUndefined, ..rest_stack],
-              pc: state.pc + 1,
-            ),
+            State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1),
           )
         }
         Error(vm_err) -> Error(#(VmError(vm_err), JsUndefined, state.heap))
@@ -4806,13 +4798,7 @@ fn call_native_promise_resolve_fn(
             err,
           )
 
-        Ok(
-          State(
-            ..state,
-            stack: [JsUndefined, ..rest_stack],
-            pc: state.pc + 1,
-          ),
-        )
+        Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
       })
 
       // Check if resolution is a thenable
@@ -4848,14 +4834,9 @@ fn call_native_promise_resolve_fn(
 
         Error(#(option.Some(thrown), state)) -> {
           // Getter threw — reject promise with the error (spec 25.6.1.3.2 step 9)
-          let state =
-            builtins_promise.reject_promise(state, data_ref, thrown)
+          let state = builtins_promise.reject_promise(state, data_ref, thrown)
 
-          State(
-            ..state,
-            stack: [JsUndefined, ..rest_stack],
-            pc: state.pc + 1,
-          )
+          State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1)
           |> Ok
         }
 
@@ -4907,13 +4888,7 @@ fn call_native_promise_reject_fn(
           data_ref,
           reason,
         )
-      Ok(
-        State(
-          ..state,
-          stack: [JsUndefined, ..rest_stack],
-          pc: state.pc + 1,
-        ),
-      )
+      Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
     }
   }
 }
@@ -5255,8 +5230,7 @@ fn call_native_promise_resolve_static(
         }
         Error(#(option.Some(thrown), state)) -> {
           // Getter threw — reject promise with the error
-          let state =
-            builtins_promise.reject_promise(state, data_ref, thrown)
+          let state = builtins_promise.reject_promise(state, data_ref, thrown)
           Ok(
             State(
               ..state,
@@ -5299,11 +5273,7 @@ fn call_native_promise_reject_static(
       state.builtins.promise.prototype,
     )
   let state =
-    builtins_promise.reject_promise(
-      State(..state, heap: h),
-      data_ref,
-      reason,
-    )
+    builtins_promise.reject_promise(State(..state, heap: h), data_ref, reason)
   Ok(
     State(
       ..state,
@@ -6036,7 +6006,6 @@ fn report_unhandled_rejections(state: State) -> Nil {
   })
 }
 
-
 /// Drain all jobs in the job queue, processing any new jobs that get enqueued
 /// during execution. Loops until the queue is empty.
 fn drain_jobs(state: State) -> State {
@@ -6116,11 +6085,7 @@ fn handle_mailbox_event(state: State, event: value.MailboxEvent) -> State {
       let #(heap, reason) =
         builtins_arc.deserialize(state.heap, state.builtins, pm)
       let state =
-        builtins_promise.reject_promise(
-          State(..state, heap:),
-          data_ref,
-          reason,
-        )
+        builtins_promise.reject_promise(State(..state, heap:), data_ref, reason)
       State(..state, outstanding: state.outstanding - 1)
     }
     value.ReceiverTimeout(data_ref:) ->

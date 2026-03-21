@@ -4,6 +4,7 @@
 /// In this implementation, keys are stored by Ref (object identity).
 /// Not truly weak (GC doesn't collect entries) but API-compatible.
 import arc/vm/builtins/common.{type BuiltinType}
+import arc/vm/builtins/helpers.{first_arg}
 import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
 import arc/vm/js_elements
@@ -86,33 +87,14 @@ fn weak_map_get(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let key = case args {
-    [k, ..] -> k
-    [] -> JsUndefined
-  }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: WeakMapObject(data:), ..)) ->
-          case key {
-            JsObject(key_ref) ->
-              case dict.get(data, key_ref) {
-                Ok(val) -> #(state, Ok(val))
-                Error(Nil) -> #(state, Ok(JsUndefined))
-              }
-            _ -> #(state, Ok(JsUndefined))
-          }
-        _ ->
-          frame.type_error(
-            state,
-            "WeakMap.prototype.get requires that 'this' be a WeakMap",
-          )
+  use data, _ref, state <- require_weak_map(this, state)
+  case first_arg(args) {
+    JsObject(key_ref) ->
+      case dict.get(data, key_ref) {
+        Ok(val) -> #(state, Ok(val))
+        Error(Nil) -> #(state, Ok(JsUndefined))
       }
-    _ ->
-      frame.type_error(
-        state,
-        "WeakMap.prototype.get requires that 'this' be a WeakMap",
-      )
+    _ -> #(state, Ok(JsUndefined))
   }
 }
 
@@ -122,37 +104,18 @@ fn weak_map_set(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let key = case args {
-    [k, ..] -> k
-    [] -> JsUndefined
-  }
-  let val = case args {
-    [_, v, ..] -> v
-    _ -> JsUndefined
-  }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: WeakMapObject(data:), ..)) ->
-          case key {
-            JsObject(key_ref) -> {
-              let new_data = dict.insert(data, key_ref, val)
-              let heap = update_weak_map(state.heap, ref, new_data)
-              #(State(..state, heap:), Ok(this))
-            }
-            _ -> frame.type_error(state, "Invalid value used as weak map key")
-          }
-        _ ->
-          frame.type_error(
-            state,
-            "WeakMap.prototype.set requires that 'this' be a WeakMap",
-          )
+  use data, ref, state <- require_weak_map(this, state)
+  case first_arg(args) {
+    JsObject(key_ref) -> {
+      let val = case args {
+        [_, v, ..] -> v
+        _ -> JsUndefined
       }
-    _ ->
-      frame.type_error(
-        state,
-        "WeakMap.prototype.set requires that 'this' be a WeakMap",
-      )
+      let new_data = dict.insert(data, key_ref, val)
+      let heap = update_weak_map(state.heap, ref, new_data)
+      #(State(..state, heap:), Ok(this))
+    }
+    _ -> frame.type_error(state, "Invalid value used as weak map key")
   }
 }
 
@@ -162,32 +125,10 @@ fn weak_map_has(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let key = case args {
-    [k, ..] -> k
-    [] -> JsUndefined
-  }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: WeakMapObject(data:), ..)) ->
-          case key {
-            JsObject(key_ref) -> #(
-              state,
-              Ok(value.JsBool(dict.has_key(data, key_ref))),
-            )
-            _ -> #(state, Ok(value.JsBool(False)))
-          }
-        _ ->
-          frame.type_error(
-            state,
-            "WeakMap.prototype.has requires that 'this' be a WeakMap",
-          )
-      }
-    _ ->
-      frame.type_error(
-        state,
-        "WeakMap.prototype.has requires that 'this' be a WeakMap",
-      )
+  use data, _ref, state <- require_weak_map(this, state)
+  case first_arg(args) {
+    JsObject(key_ref) -> #(state, Ok(value.JsBool(dict.has_key(data, key_ref))))
+    _ -> #(state, Ok(value.JsBool(False)))
   }
 }
 
@@ -197,34 +138,37 @@ fn weak_map_delete(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let key = case args {
-    [k, ..] -> k
-    [] -> JsUndefined
+  use data, ref, state <- require_weak_map(this, state)
+  case first_arg(args) {
+    JsObject(key_ref) -> {
+      let had = dict.has_key(data, key_ref)
+      let new_data = dict.delete(data, key_ref)
+      let heap = update_weak_map(state.heap, ref, new_data)
+      #(State(..state, heap:), Ok(value.JsBool(had)))
+    }
+    _ -> #(state, Ok(value.JsBool(False)))
   }
+}
+
+// ---- helpers ----
+
+/// Unwrap `this` as a WeakMap or return a TypeError.
+/// CPS-style — call with `use data, ref, state <- require_weak_map(this, state)`.
+fn require_weak_map(
+  this: JsValue,
+  state: State,
+  cont: fn(dict.Dict(Ref, JsValue), Ref, State) ->
+    #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  let err = "Method WeakMap.prototype.* called on incompatible receiver"
   case this {
     JsObject(ref) ->
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: WeakMapObject(data:), ..)) ->
-          case key {
-            JsObject(key_ref) -> {
-              let had = dict.has_key(data, key_ref)
-              let new_data = dict.delete(data, key_ref)
-              let heap = update_weak_map(state.heap, ref, new_data)
-              #(State(..state, heap:), Ok(value.JsBool(had)))
-            }
-            _ -> #(state, Ok(value.JsBool(False)))
-          }
-        _ ->
-          frame.type_error(
-            state,
-            "WeakMap.prototype.delete requires that 'this' be a WeakMap",
-          )
+          cont(data, ref, state)
+        _ -> frame.type_error(state, err)
       }
-    _ ->
-      frame.type_error(
-        state,
-        "WeakMap.prototype.delete requires that 'this' be a WeakMap",
-      )
+    _ -> frame.type_error(state, err)
   }
 }
 

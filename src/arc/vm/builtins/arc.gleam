@@ -1,15 +1,17 @@
 import arc/vm/builtins/common
+import arc/vm/builtins/promise as builtins_promise
 import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
 import arc/vm/js_elements
 import arc/vm/value.{
-  type ArcNativeFn, type JsValue, type PortableMessage, type Ref, ArcLog,
-  ArcNative, ArcPeek, ArcPidToString, ArcReceive, ArcSelf, ArcSend, ArcSleep,
-  DataProperty, JsBigInt, JsBool, JsNull, JsNumber, JsObject, JsString, JsSymbol,
-  JsUndefined, JsUninitialized, ObjectSlot, OrdinaryObject, PidObject, PmArray,
-  PmBigInt, PmBool, PmNull, PmNumber, PmObject, PmPid, PmString, PmSymbol,
-  PmUndefined, PromiseFulfilled, PromiseObject, PromisePending, PromiseRejected,
-  PromiseSlot,
+  type ArcNativeFn, type JsValue, type MailboxEvent, type PortableMessage,
+  type Ref, ArcLog, ArcNative, ArcPeek, ArcPidToString, ArcReceive,
+  ArcReceiveAsync, ArcSelf, ArcSend, ArcSetTimeout, ArcSleep, DataProperty,
+  JsBigInt, JsBool, JsNull, JsNumber, JsObject, JsString, JsSymbol, JsUndefined,
+  JsUninitialized, ObjectSlot, OrdinaryObject, PidObject, PmArray, PmBigInt,
+  PmBool, PmNull, PmNumber, PmObject, PmPid, PmString, PmSymbol, PmUndefined,
+  PromiseFulfilled, PromiseObject, PromisePending, PromiseRejected, PromiseSlot,
+  SettlePromise, UserMessage,
 }
 import gleam/dict
 import gleam/io
@@ -25,13 +27,13 @@ import gleam/string
 fn ffi_self() -> value.ErlangPid
 
 @external(erlang, "arc_vm_ffi", "send_message")
-fn ffi_send(pid: value.ErlangPid, msg: PortableMessage) -> Nil
+fn ffi_send(pid: value.ErlangPid, msg: MailboxEvent) -> Nil
 
-@external(erlang, "arc_vm_ffi", "receive_message_infinite")
-fn ffi_receive_infinite() -> PortableMessage
+@external(erlang, "arc_vm_ffi", "receive_user_message")
+fn ffi_receive_user() -> PortableMessage
 
-@external(erlang, "arc_vm_ffi", "receive_message_timeout")
-fn ffi_receive_timeout(timeout: Int) -> Result(PortableMessage, Nil)
+@external(erlang, "arc_vm_ffi", "receive_user_message_timeout")
+fn ffi_receive_user_timeout(timeout: Int) -> Result(PortableMessage, Nil)
 
 /// Returns the pid in the format `<x.x.x>
 @external(erlang, "arc_vm_ffi", "pid_to_string")
@@ -39,6 +41,9 @@ pub fn ffi_pid_to_string(pid: value.ErlangPid) -> String
 
 @external(erlang, "arc_vm_ffi", "sleep")
 fn ffi_sleep(ms: Int) -> Nil
+
+@external(erlang, "arc_vm_ffi", "send_after")
+fn ffi_send_after(ms: Int, pid: value.ErlangPid, msg: MailboxEvent) -> Nil
 
 // -- Init --------------------------------------------------------------------
 
@@ -49,6 +54,8 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       #("spawn", value.VmNative(value.ArcSpawn), 1),
       #("send", ArcNative(ArcSend), 2),
       #("receive", ArcNative(ArcReceive), 0),
+      #("receiveAsync", ArcNative(ArcReceiveAsync), 0),
+      #("setTimeout", ArcNative(ArcSetTimeout), 2),
       #("self", ArcNative(ArcSelf), 0),
       #("log", ArcNative(ArcLog), 1),
       #("sleep", ArcNative(ArcSleep), 1),
@@ -91,6 +98,8 @@ pub fn dispatch(
     value.ArcPeek -> peek(args, state)
     value.ArcSend -> send(args, state)
     value.ArcReceive -> receive_(args, state)
+    value.ArcReceiveAsync -> receive_async(args, state)
+    value.ArcSetTimeout -> set_timeout(args, state)
     value.ArcSelf -> self_(args, state)
     value.ArcLog -> log(args, state)
     value.ArcSleep -> sleep(args, state)
@@ -100,7 +109,7 @@ pub fn dispatch(
 
 // -- Arc.peek ----------------------------------------------------------------
 
-/// Non-standard: Arc.peek(promise)
+/// Arc.peek(promise)
 /// Returns {type: 'pending'} | {type: 'resolved', value} | {type: 'rejected', reason}
 pub fn peek(
   args: List(JsValue),
@@ -192,7 +201,7 @@ pub fn send(
       |> result.map_error(fn(reason) { "Arc.send: " <> reason }),
     )
 
-    ffi_send(pid, portable)
+    ffi_send(pid, UserMessage(portable))
     Ok(msg_arg)
   }
 
@@ -207,10 +216,14 @@ pub fn send(
 
 // -- Arc.receive -------------------------------------------------------------
 
-/// Non-standard: Arc.receive(timeout?)
+/// Arc.receive(timeout?)
 /// Blocks the current BEAM process waiting for a message. If timeout is
 /// provided (in ms), returns undefined on timeout. Without timeout, blocks
 /// forever.
+///
+/// Uses selective receive — only matches `UserMessage`, so `SettlePromise`
+/// events stay in the mailbox for the event loop. Both blocking and async
+/// receive share the same BEAM mailbox with no in-memory buffer.
 pub fn receive_(
   args: List(JsValue),
   state: State,
@@ -220,9 +233,9 @@ pub fn receive_(
       let ms = value.float_to_int(n)
       case ms >= 0 {
         True ->
-          case ffi_receive_timeout(ms) {
-            Ok(msg) -> {
-              let #(heap, val) = deserialize(state.heap, state.builtins, msg)
+          case ffi_receive_user_timeout(ms) {
+            Ok(pm) -> {
+              let #(heap, val) = deserialize(state.heap, state.builtins, pm)
               #(State(..state, heap:), Ok(val))
             }
             Error(Nil) -> #(state, Ok(JsUndefined))
@@ -231,17 +244,115 @@ pub fn receive_(
       }
     }
     _ -> {
-      // No timeout — block forever
-      let msg = ffi_receive_infinite()
-      let #(heap, val) = deserialize(state.heap, state.builtins, msg)
+      let pm = ffi_receive_user()
+      let #(heap, val) = deserialize(state.heap, state.builtins, pm)
       #(State(..state, heap:), Ok(val))
     }
   }
 }
 
+// -- Arc.receiveAsync --------------------------------------------------------
+
+/// Arc.receiveAsync(timeout?)
+/// Returns a Promise that resolves with the next UserMessage to arrive in
+/// this process's mailbox. Unlike `Arc.receive`, this does NOT block the
+/// VM — the calling async function suspends at `await`, and other async
+/// functions keep running via the event loop.
+///
+/// If `timeout` (ms) is given, the promise resolves with `undefined` when
+/// it elapses without a message — same semantics as blocking
+/// `Arc.receive(ms)`. The timeout message and the user message race in
+/// the mailbox; whichever the event loop picks first wins, the other
+/// becomes a no-op.
+///
+/// Messages that arrive before a receiver is waiting stay in the BEAM
+/// mailbox (the event loop uses selective receive to skip them), so
+/// blocking `Arc.receive()` and `receiveAsync` share the same mailbox
+/// without any in-memory buffer.
+///
+/// Requires the event loop to be running (run_with_event_loop or Arc.spawn).
+pub fn receive_async(
+  args: List(JsValue),
+  state: State,
+) -> #(State, Result(JsValue, JsValue)) {
+  let #(heap, obj_ref, data_ref) =
+    builtins_promise.create_promise(
+      state.heap,
+      state.builtins.promise.prototype,
+    )
+  case args {
+    [JsNumber(value.Finite(n)), ..] -> {
+      let ms = value.float_to_int(n)
+      case ms >= 0 {
+        True -> ffi_send_after(ms, ffi_self(), value.ReceiverTimeout(data_ref))
+        False -> Nil
+      }
+    }
+    _ -> Nil
+  }
+  #(
+    State(
+      ..state,
+      heap:,
+      pending_receivers: list.append(state.pending_receivers, [data_ref]),
+      outstanding: state.outstanding + 1,
+    ),
+    Ok(JsObject(obj_ref)),
+  )
+}
+
+// -- Arc.setTimeout ----------------------------------------------------------
+
+/// Arc.setTimeout(fn, ms)
+/// Schedules `fn` to be called after `ms` milliseconds. Returns undefined.
+/// Works by creating a pending promise, telling BEAM to send a
+/// SettlePromise message back to self after `ms`, and attaching `fn` as
+/// the promise's fulfill handler — so when the timer fires, the event loop
+/// resolves the promise, which schedules a reaction job that calls `fn`.
+///
+/// Requires the event loop to be running (run_with_event_loop or Arc.spawn).
+pub fn set_timeout(
+  args: List(JsValue),
+  state: State,
+) -> #(State, Result(JsValue, JsValue)) {
+  let #(callback, ms) = case args {
+    [cb, JsNumber(value.Finite(n)), ..] -> #(cb, value.float_to_int(n))
+    [cb, ..] -> #(cb, 0)
+    [] -> #(JsUndefined, 0)
+  }
+  let ms = case ms < 0 {
+    True -> 0
+    False -> ms
+  }
+  let #(heap, _obj_ref, data_ref) =
+    builtins_promise.create_promise(
+      state.heap,
+      state.builtins.promise.prototype,
+    )
+  let #(heap, jobs) =
+    builtins_promise.perform_promise_then(
+      heap,
+      data_ref,
+      callback,
+      JsUndefined,
+      JsUndefined,
+      JsUndefined,
+    )
+  ffi_send_after(ms, ffi_self(), SettlePromise(data_ref, Ok(PmUndefined)))
+  #(
+    State(
+      ..state,
+      heap:,
+      outstanding: state.outstanding + 1,
+      job_queue: list.append(state.job_queue, jobs),
+    ),
+    Ok(JsUndefined),
+  )
+}
+
 // -- Arc.self ----------------------------------------------------------------
 
-/// Non-standard: Arc.self()
+/// Arc.self()
 /// Returns a Pid object representing the current BEAM process.
 pub fn self_(
   _args: List(JsValue),
@@ -260,7 +371,7 @@ pub fn self_(
 
 // -- Arc.log -----------------------------------------------------------------
 
-/// Non-standard: Arc.log(...args)
+/// Arc.log(...args)
 /// Prints values to stdout, space-separated, with a newline.
 /// Similar to console.log but available in spawned processes.
 pub fn log(
@@ -319,7 +430,7 @@ fn log_stringify_one(val: JsValue, state: State) -> #(State, String) {
 
 // -- Arc.sleep ---------------------------------------------------------------
 
-/// Non-standard: Arc.sleep(ms)
+/// Arc.sleep(ms)
 /// Suspends the current BEAM process for the given number of milliseconds.
 /// Maps directly to Erlang's timer:sleep/1.
 pub fn sleep(

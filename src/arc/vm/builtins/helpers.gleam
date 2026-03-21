@@ -33,11 +33,20 @@ pub fn is_callable(h: Heap, val: JsValue) -> Bool {
 
 /// Get element at index from a list (0-based). O(n).
 /// Non-spec utility — used by get_int_arg/get_num_arg for argument access.
-fn list_at(lst: List(a), idx: Int) -> Option(a) {
+pub fn list_at(lst: List(a), idx: Int) -> Option(a) {
   case idx, lst {
     0, [x, ..] -> Some(x)
     n, [_, ..rest] -> list_at(rest, n - 1)
     _, [] -> None
+  }
+}
+
+/// Get first arg or JsUndefined if the list is empty.
+/// Non-spec utility — JS functions default missing args to undefined.
+pub fn first_arg(args: List(JsValue)) -> JsValue {
+  case args {
+    [v, ..] -> v
+    [] -> JsUndefined
   }
 }
 

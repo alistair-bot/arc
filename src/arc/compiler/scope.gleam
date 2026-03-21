@@ -144,6 +144,16 @@ fn resolve_one(r: Resolver, op: EmitterOp) -> Resolver {
     }
 
     DeclareVar(name, kind) -> {
+      // If already declared in the target scope, skip entirely (no new slot,
+      // no IR). Lets the emitter hoist let/const DeclareVar before hoisted
+      // function MakeClosure without the inline DeclareVar double-boxing.
+      let already = case kind {
+        VarBinding | ParamBinding | CaptureBinding ->
+          lookup_in_function_scope(r.scopes, name)
+        LetBinding | ConstBinding | CatchBinding ->
+          lookup_in_current_scope(r.scopes, name)
+      }
+      use <- on_some(already, r)
       let index = r.next_local
       let boxed = set.contains(r.captured_vars, name)
       let binding = Binding(index:, kind:, is_boxed: boxed)
@@ -288,6 +298,33 @@ fn lookup(scopes: List(Scope), name: String) -> Option(Binding) {
         Ok(binding) -> Some(binding)
         Error(_) -> lookup(rest, name)
       }
+  }
+}
+
+fn lookup_in_current_scope(scopes: List(Scope), name: String) -> Option(Binding) {
+  case scopes {
+    [] -> None
+    [scope, ..] -> dict.get(scope.bindings, name) |> option.from_result
+  }
+}
+
+fn lookup_in_function_scope(
+  scopes: List(Scope),
+  name: String,
+) -> Option(Binding) {
+  case scopes {
+    [] -> None
+    [Scope(kind: FunctionScope, bindings:), ..] ->
+      dict.get(bindings, name) |> option.from_result
+    [Scope(kind: BlockScope, ..), ..rest] ->
+      lookup_in_function_scope(rest, name)
+  }
+}
+
+fn on_some(opt: Option(a), if_some: b, cont: fn() -> b) -> b {
+  case opt {
+    Some(_) -> if_some
+    None -> cont()
   }
 }
 

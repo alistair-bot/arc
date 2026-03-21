@@ -315,19 +315,45 @@ pub fn alloc_regexp(
   )
 }
 
-/// Extract pattern and flags from a RegExp `this` value.
-fn this_regexp_value(
-  state: State,
+/// Unwrap `this` as a RegExp or return a TypeError.
+/// CPS-style — `use pattern, flags, ref, state <- require_regexp(this, state, "method")`.
+fn require_regexp(
   this: JsValue,
-) -> Result(#(String, String, Ref), Nil) {
+  state: State,
+  method: String,
+  cont: fn(String, String, Ref, State) -> #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
   case this {
     JsObject(ref) ->
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: RegExpObject(pattern:, flags:), ..)) ->
-          Ok(#(pattern, flags, ref))
-        _ -> Error(Nil)
+          cont(pattern, flags, ref, state)
+        _ -> not_regexp(state, method)
       }
-    _ -> Error(Nil)
+    _ -> not_regexp(state, method)
+  }
+}
+
+fn not_regexp(
+  state: State,
+  method: String,
+) -> #(State, Result(JsValue, JsValue)) {
+  frame.type_error(
+    state,
+    "RegExp.prototype." <> method <> " requires that 'this' be a RegExp",
+  )
+}
+
+/// Coerce first arg to a string, defaulting to "undefined".
+/// NOTE: silently drops ToString side-effects on state — existing behavior preserved.
+fn string_arg(state: State, args: List(JsValue)) -> String {
+  case args {
+    [arg, ..] ->
+      case frame.to_string(state, arg) {
+        Ok(#(s, _)) -> s
+        Error(_) -> "undefined"
+      }
+    [] -> "undefined"
   }
 }
 
@@ -375,36 +401,28 @@ fn regexp_test(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, flags, ref)) -> {
-      let str = case args {
-        [JsString(s), ..] -> s
-        _ -> "undefined"
-      }
-      let is_global_or_sticky =
-        string.contains(flags, "g") || string.contains(flags, "y")
-      case is_global_or_sticky {
-        False -> #(state, Ok(JsBool(ffi_regexp_test(pattern, flags, str))))
-        True -> {
-          let last_index = read_last_index(state, ref)
-          case ffi_regexp_exec(pattern, flags, str, last_index) {
-            Ok([#(start, len), ..]) -> {
-              let state = write_last_index(state, ref, start + len)
-              #(state, Ok(JsBool(True)))
-            }
-            _ -> {
-              let state = write_last_index(state, ref, 0)
-              #(state, Ok(JsBool(False)))
-            }
-          }
+  use pattern, flags, ref, state <- require_regexp(this, state, "test")
+  let str = case args {
+    [JsString(s), ..] -> s
+    _ -> "undefined"
+  }
+  let is_global_or_sticky =
+    string.contains(flags, "g") || string.contains(flags, "y")
+  case is_global_or_sticky {
+    False -> #(state, Ok(JsBool(ffi_regexp_test(pattern, flags, str))))
+    True -> {
+      let last_index = read_last_index(state, ref)
+      case ffi_regexp_exec(pattern, flags, str, last_index) {
+        Ok([#(start, len), ..]) -> {
+          let state = write_last_index(state, ref, start + len)
+          #(state, Ok(JsBool(True)))
+        }
+        _ -> {
+          let state = write_last_index(state, ref, 0)
+          #(state, Ok(JsBool(False)))
         }
       }
     }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype.test requires that 'this' be a RegExp",
-      )
   }
 }
 
@@ -414,91 +432,73 @@ fn regexp_exec(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, flags, ref)) -> {
-      let str = case args {
-        [JsString(s), ..] -> s
-        _ -> "undefined"
+  use pattern, flags, ref, state <- require_regexp(this, state, "exec")
+  let str = case args {
+    [JsString(s), ..] -> s
+    _ -> "undefined"
+  }
+  let is_global_or_sticky =
+    string.contains(flags, "g") || string.contains(flags, "y")
+  let offset = case is_global_or_sticky {
+    True -> read_last_index(state, ref)
+    False -> 0
+  }
+  case ffi_regexp_exec(pattern, flags, str, offset) {
+    Ok(captures) -> {
+      // Build the result array: [full_match, group1, group2, ...]
+      let #(match_strings, match_start) = case captures {
+        [#(start, len), ..rest] -> {
+          let full = string.slice(str, start, len)
+          let groups = list.map(rest, capture_to_value(str, _))
+          #([JsString(full), ..groups], start)
+        }
+        [] -> #([JsString("")], 0)
       }
-      let is_global_or_sticky =
-        string.contains(flags, "g") || string.contains(flags, "y")
-      let offset = case is_global_or_sticky {
-        True -> read_last_index(state, ref)
-        False -> 0
+
+      // Update lastIndex for global/sticky
+      let state = case is_global_or_sticky, captures {
+        True, [#(start, len), ..] -> write_last_index(state, ref, start + len)
+        _, _ -> state
       }
-      case ffi_regexp_exec(pattern, flags, str, offset) {
-        Ok(captures) -> {
-          // Build the result array: [full_match, group1, group2, ...]
-          let #(match_strings, match_start) = case captures {
-            [#(start, len), ..rest] -> {
-              let full = string.slice(str, start, len)
-              let groups =
-                list.map(rest, fn(cap) {
-                  case cap {
-                    #(s, l) if s >= 0 -> JsString(string.slice(str, s, l))
-                    _ -> JsUndefined
-                  }
-                })
-              #([JsString(full), ..groups], start)
-            }
-            [] -> #([JsString("")], 0)
-          }
 
-          // Update lastIndex for global/sticky
-          let state = case is_global_or_sticky, captures {
-            True, [#(start, len), ..] ->
-              write_last_index(state, ref, start + len)
-            _, _ -> state
-          }
+      // Allocate the result array
+      let #(heap, arr_ref) =
+        common.alloc_array(
+          state.heap,
+          match_strings,
+          state.builtins.array.prototype,
+        )
 
-          // Allocate the result array
-          let #(heap, arr_ref) =
-            common.alloc_array(
-              state.heap,
-              match_strings,
-              state.builtins.array.prototype,
-            )
-
-          // Set index and input properties on the array
-          let heap =
-            heap.update(heap, arr_ref, fn(slot) {
-              case slot {
-                ObjectSlot(properties: props, ..) ->
-                  ObjectSlot(
-                    ..slot,
-                    properties: props
-                      |> dict.insert(
-                        "index",
-                        value.data_property(
-                          JsNumber(Finite(int.to_float(match_start))),
-                        ),
-                      )
-                      |> dict.insert(
-                        "input",
-                        value.data_property(JsString(str)),
-                      ),
+      // Set index and input properties on the array
+      let heap =
+        heap.update(heap, arr_ref, fn(slot) {
+          case slot {
+            ObjectSlot(properties: props, ..) ->
+              ObjectSlot(
+                ..slot,
+                properties: props
+                  |> dict.insert(
+                    "index",
+                    value.data_property(
+                      JsNumber(Finite(int.to_float(match_start))),
+                    ),
                   )
-                other -> other
-              }
-            })
-
-          #(State(..state, heap:), Ok(JsObject(arr_ref)))
-        }
-        Error(Nil) -> {
-          // No match — reset lastIndex for global/sticky, return null
-          let state = case is_global_or_sticky {
-            True -> write_last_index(state, ref, 0)
-            False -> state
+                  |> dict.insert("input", value.data_property(JsString(str))),
+              )
+            other -> other
           }
-          #(state, Ok(JsNull))
-        }
-      }
+        })
+
+      #(State(..state, heap:), Ok(JsObject(arr_ref)))
     }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype.exec requires that 'this' be a RegExp",
-      )
+    Error(Nil) -> {
+      // No match — reset lastIndex for global/sticky, return null
+      let state = case is_global_or_sticky {
+        True -> write_last_index(state, ref, 0)
+        False -> state
+      }
+      #(state, Ok(JsNull))
+    }
   }
 }
 
@@ -507,20 +507,8 @@ fn regexp_to_string(
   this: JsValue,
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, flags, _ref)) -> {
-      let source = case pattern {
-        "" -> "(?:)"
-        p -> p
-      }
-      #(state, Ok(JsString("/" <> source <> "/" <> flags)))
-    }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype.toString requires that 'this' be a RegExp",
-      )
-  }
+  use pattern, flags, _ref, state <- require_regexp(this, state, "toString")
+  #(state, Ok(JsString("/" <> source_string(pattern) <> "/" <> flags)))
 }
 
 /// RegExp.prototype.source getter
@@ -528,20 +516,8 @@ fn regexp_get_source(
   this: JsValue,
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, _flags, _ref)) -> {
-      let source = case pattern {
-        "" -> "(?:)"
-        p -> p
-      }
-      #(state, Ok(JsString(source)))
-    }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype.source requires that 'this' be a RegExp",
-      )
-  }
+  use pattern, _flags, _ref, state <- require_regexp(this, state, "source")
+  #(state, Ok(JsString(source_string(pattern))))
 }
 
 /// RegExp.prototype.flags getter
@@ -549,14 +525,8 @@ fn regexp_get_flags(
   this: JsValue,
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(_pattern, flags, _ref)) -> #(state, Ok(JsString(flags)))
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype.flags requires that 'this' be a RegExp",
-      )
-  }
+  use _pattern, flags, _ref, state <- require_regexp(this, state, "flags")
+  #(state, Ok(JsString(flags)))
 }
 
 /// Generic flag getter — checks if a specific flag character is in the flags string.
@@ -565,17 +535,8 @@ fn regexp_flag_getter(
   flag: String,
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(_pattern, flags, _ref)) -> #(
-      state,
-      Ok(JsBool(string.contains(flags, flag))),
-    )
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype flag getter requires that 'this' be a RegExp",
-      )
-  }
+  use _pattern, flags, _ref, state <- require_regexp(this, state, "flag getter")
+  #(state, Ok(JsBool(string.contains(flags, flag))))
 }
 
 // ---------------------------------------------------------------------------
@@ -588,46 +549,26 @@ fn regexp_symbol_match(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, flags, ref)) -> {
-      let str = case args {
-        [arg, ..] ->
-          case frame.to_string(state, arg) {
-            Ok(#(s, _)) -> s
-            _ -> "undefined"
-          }
-        [] -> "undefined"
-      }
-      let is_global = string.contains(flags, "g")
-      case is_global {
-        // Non-global: delegate to exec
-        False -> regexp_exec(this, [JsString(str)], state)
-        // Global: collect all matches
-        True -> {
-          let state = write_last_index(state, ref, 0)
-          let #(state, matches) =
-            collect_global_matches(pattern, flags, str, ref, state, [])
-          case matches {
-            [] -> #(state, Ok(JsNull))
-            _ -> {
-              let vals = list.reverse(matches)
-              let #(heap, arr_ref) =
-                common.alloc_array(
-                  state.heap,
-                  vals,
-                  state.builtins.array.prototype,
-                )
-              #(State(..state, heap:), Ok(JsObject(arr_ref)))
-            }
-          }
+  use pattern, flags, ref, state <- require_regexp(this, state, "[@@match]")
+  let str = string_arg(state, args)
+  case string.contains(flags, "g") {
+    // Non-global: delegate to exec
+    False -> regexp_exec(this, [JsString(str)], state)
+    // Global: collect all matches
+    True -> {
+      let state = write_last_index(state, ref, 0)
+      let #(state, matches) =
+        collect_global_matches(pattern, flags, str, ref, state, [])
+      case matches {
+        [] -> #(state, Ok(JsNull))
+        _ -> {
+          let vals = list.reverse(matches)
+          let #(heap, arr_ref) =
+            common.alloc_array(state.heap, vals, state.builtins.array.prototype)
+          #(State(..state, heap:), Ok(JsObject(arr_ref)))
         }
       }
     }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype[@@match] requires that 'this' be a RegExp",
-      )
   }
 }
 
@@ -668,34 +609,17 @@ fn regexp_symbol_search(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, flags, ref)) -> {
-      let str = case args {
-        [arg, ..] ->
-          case frame.to_string(state, arg) {
-            Ok(#(s, _)) -> s
-            _ -> "undefined"
-          }
-        [] -> "undefined"
-      }
-      // Save previous lastIndex, set to 0
-      let previous_last_index = read_last_index(state, ref)
-      let state = write_last_index(state, ref, 0)
-      // Execute
-      let result = case ffi_regexp_exec(pattern, flags, str, 0) {
-        Ok([#(start, _), ..]) -> JsNumber(Finite(int.to_float(start)))
-        _ -> JsNumber(Finite(-1.0))
-      }
-      // Restore lastIndex
-      let state = write_last_index(state, ref, previous_last_index)
-      #(state, Ok(result))
-    }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype[@@search] requires that 'this' be a RegExp",
-      )
+  use pattern, flags, ref, state <- require_regexp(this, state, "[@@search]")
+  let str = string_arg(state, args)
+  // Save previous lastIndex, set to 0, execute, restore.
+  let previous_last_index = read_last_index(state, ref)
+  let state = write_last_index(state, ref, 0)
+  let result = case ffi_regexp_exec(pattern, flags, str, 0) {
+    Ok([#(start, _), ..]) -> JsNumber(Finite(int.to_float(start)))
+    _ -> JsNumber(Finite(-1.0))
   }
+  let state = write_last_index(state, ref, previous_last_index)
+  #(state, Ok(result))
 }
 
 /// ES2024 §22.2.5.10 RegExp.prototype[@@replace](string, replaceValue)
@@ -704,33 +628,41 @@ fn regexp_symbol_replace(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, flags, ref)) -> {
-      let str = case args {
-        [arg, ..] ->
-          case frame.to_string(state, arg) {
-            Ok(#(s, _)) -> s
-            _ -> "undefined"
-          }
-        [] -> "undefined"
-      }
-      let replace_value = case args {
-        [_, rv, ..] -> rv
-        _ -> JsUndefined
-      }
-      let functional_replace = helpers.is_callable(state.heap, replace_value)
-      let is_global = string.contains(flags, "g")
+  use pattern, flags, ref, state <- require_regexp(this, state, "[@@replace]")
+  let str = string_arg(state, args)
+  let replace_value = case args {
+    [_, rv, ..] -> rv
+    _ -> JsUndefined
+  }
+  let functional_replace = helpers.is_callable(state.heap, replace_value)
 
-      // Collect matches
-      case is_global {
-        True -> {
-          let state = write_last_index(state, ref, 0)
-          let #(state, matches) =
-            collect_replace_matches(pattern, flags, str, ref, state, [])
-          let matches = list.reverse(matches)
+  case string.contains(flags, "g") {
+    True -> {
+      let state = write_last_index(state, ref, 0)
+      let #(state, matches) =
+        collect_replace_matches(pattern, flags, str, ref, state, [])
+      let matches = list.reverse(matches)
+      apply_replacements(
+        str,
+        matches,
+        replace_value,
+        functional_replace,
+        state,
+        0,
+        "",
+      )
+    }
+    False -> {
+      let offset = case string.contains(flags, "y") {
+        True -> read_last_index(state, ref)
+        False -> 0
+      }
+      case ffi_regexp_exec(pattern, flags, str, offset) {
+        Ok(captures) -> {
+          let match_info = extract_match_info(str, captures)
           apply_replacements(
             str,
-            matches,
+            [match_info],
             replace_value,
             functional_replace,
             state,
@@ -738,34 +670,9 @@ fn regexp_symbol_replace(
             "",
           )
         }
-        False -> {
-          let offset = case string.contains(flags, "y") {
-            True -> read_last_index(state, ref)
-            False -> 0
-          }
-          case ffi_regexp_exec(pattern, flags, str, offset) {
-            Ok(captures) -> {
-              let match_info = extract_match_info(str, captures)
-              apply_replacements(
-                str,
-                [match_info],
-                replace_value,
-                functional_replace,
-                state,
-                0,
-                "",
-              )
-            }
-            Error(Nil) -> #(state, Ok(JsString(str)))
-          }
-        }
+        Error(Nil) -> #(state, Ok(JsString(str)))
       }
     }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype[@@replace] requires that 'this' be a RegExp",
-      )
   }
 }
 
@@ -779,13 +686,7 @@ fn extract_match_info(str: String, captures: List(#(Int, Int))) -> MatchInfo {
   case captures {
     [#(start, len), ..rest] -> {
       let matched = string.slice(str, start, len)
-      let groups =
-        list.map(rest, fn(cap) {
-          case cap {
-            #(s, l) if s >= 0 -> JsString(string.slice(str, s, l))
-            _ -> JsUndefined
-          }
-        })
+      let groups = list.map(rest, capture_to_value(str, _))
       MatchInfo(matched:, position: start, captures: groups)
     }
     [] -> MatchInfo(matched: "", position: 0, captures: [])
@@ -1000,7 +901,7 @@ fn estimate_substitution_length(
         True ->
           case int.parse(d1 <> d2) {
             Ok(idx) if idx >= 1 ->
-              case list_at(captures, idx - 1) {
+              case helpers.list_at(captures, idx - 1) {
                 Some(JsString(s)) ->
                   estimate_substitution_length(
                     matched,
@@ -1071,7 +972,7 @@ fn estimate_single_digit_len(
     True ->
       case int.parse(d1) {
         Ok(idx) if idx >= 1 ->
-          case list_at(captures, idx - 1) {
+          case helpers.list_at(captures, idx - 1) {
             Some(JsString(s)) ->
               estimate_substitution_length(
                 matched,
@@ -1164,7 +1065,7 @@ fn get_substitution_loop(
           let idx_str = d1 <> d2
           case int.parse(idx_str) {
             Ok(idx) if idx >= 1 ->
-              case list_at(captures, idx - 1) {
+              case helpers.list_at(captures, idx - 1) {
                 Some(JsString(s)) ->
                   get_substitution_loop(
                     matched,
@@ -1231,7 +1132,7 @@ fn try_single_digit_ref(
     True ->
       case int.parse(d1) {
         Ok(idx) if idx >= 1 ->
-          case list_at(captures, idx - 1) {
+          case helpers.list_at(captures, idx - 1) {
             Some(JsString(s)) ->
               get_substitution_loop(
                 matched,
@@ -1274,11 +1175,19 @@ fn is_digit(ch: String) -> Bool {
   }
 }
 
-fn list_at(lst: List(a), idx: Int) -> option.Option(a) {
-  case idx, lst {
-    0, [x, ..] -> Some(x)
-    n, [_, ..rest] if n > 0 -> list_at(rest, n - 1)
-    _, _ -> None
+/// Convert a capture tuple (start, len) to JsString slice or JsUndefined if no-match (start<0).
+fn capture_to_value(str: String, cap: #(Int, Int)) -> JsValue {
+  case cap {
+    #(s, l) if s >= 0 -> JsString(string.slice(str, s, l))
+    _ -> JsUndefined
+  }
+}
+
+/// Empty pattern displays as "(?:)" per spec §22.2.5.12.
+fn source_string(pattern: String) -> String {
+  case pattern {
+    "" -> "(?:)"
+    p -> p
   }
 }
 
@@ -1288,69 +1197,35 @@ fn regexp_symbol_split(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_regexp_value(state, this) {
-    Ok(#(pattern, flags, _ref)) -> {
-      let str = case args {
-        [arg, ..] ->
-          case frame.to_string(state, arg) {
-            Ok(#(s, _)) -> s
-            _ -> "undefined"
-          }
-        [] -> "undefined"
+  use pattern, flags, _ref, state <- require_regexp(this, state, "[@@split]")
+  let str = string_arg(state, args)
+  let lim = case args {
+    [_, JsUndefined, ..] | [_] | [] -> 4_294_967_295
+    [_, l, ..] ->
+      case helpers.to_number_int(l) {
+        Some(n) if n >= 0 -> n
+        _ -> 0
       }
-      let limit_val = case args {
-        [_, l, ..] -> l
-        _ -> JsUndefined
-      }
-      let lim = case limit_val {
-        JsUndefined -> 4_294_967_295
-        _ ->
-          case helpers.to_number_int(limit_val) {
-            Some(n) if n >= 0 -> n
-            _ -> 0
-          }
-      }
-      let array_proto = state.builtins.array.prototype
+  }
+  let array_proto = state.builtins.array.prototype
+  let alloc_result = fn(state: State, parts: List(JsValue)) {
+    let #(heap, ref) = common.alloc_array(state.heap, parts, array_proto)
+    #(State(..state, heap:), Ok(JsObject(ref)))
+  }
 
-      // If limit is 0, return empty array
-      case lim {
-        0 -> {
-          let #(heap, ref) = common.alloc_array(state.heap, [], array_proto)
-          #(State(..state, heap:), Ok(JsObject(ref)))
-        }
-        _ -> {
-          let str_len = string.length(str)
-          // Empty string: try to match; if match → [], else → [str]
-          case str_len {
-            0 ->
-              case ffi_regexp_exec(pattern, flags, str, 0) {
-                Ok(_) -> {
-                  let #(heap, ref) =
-                    common.alloc_array(state.heap, [], array_proto)
-                  #(State(..state, heap:), Ok(JsObject(ref)))
-                }
-                Error(Nil) -> {
-                  let #(heap, ref) =
-                    common.alloc_array(state.heap, [JsString(str)], array_proto)
-                  #(State(..state, heap:), Ok(JsObject(ref)))
-                }
-              }
-            _ -> {
-              let parts =
-                split_loop(pattern, flags, str, str_len, 0, 0, lim, [])
-              let #(heap, ref) =
-                common.alloc_array(state.heap, parts, array_proto)
-              #(State(..state, heap:), Ok(JsObject(ref)))
-            }
-          }
-        }
+  case lim, string.length(str) {
+    // If limit is 0, return empty array
+    0, _ -> alloc_result(state, [])
+    // Empty string: if regex matches → [], else → [""]
+    _, 0 ->
+      case ffi_regexp_exec(pattern, flags, str, 0) {
+        Ok(_) -> alloc_result(state, [])
+        Error(Nil) -> alloc_result(state, [JsString(str)])
       }
+    _, str_len -> {
+      let parts = split_loop(pattern, flags, str, str_len, 0, 0, lim, [])
+      alloc_result(state, parts)
     }
-    Error(Nil) ->
-      frame.type_error(
-        state,
-        "RegExp.prototype[@@split] requires that 'this' be a RegExp",
-      )
   }
 }
 
@@ -1385,16 +1260,11 @@ fn split_loop(
         }
         Ok(captures) -> {
           let #(match_start, match_end, cap_groups) = case captures {
-            [#(start, len), ..rest] -> {
-              let groups =
-                list.map(rest, fn(cap) {
-                  case cap {
-                    #(s, l) if s >= 0 -> JsString(string.slice(str, s, l))
-                    _ -> JsUndefined
-                  }
-                })
-              #(start, start + len, groups)
-            }
+            [#(start, len), ..rest] -> #(
+              start,
+              start + len,
+              list.map(rest, capture_to_value(str, _)),
+            )
             [] -> #(search_from, search_from, [])
           }
           // If the match is at the end of the string with zero width, skip

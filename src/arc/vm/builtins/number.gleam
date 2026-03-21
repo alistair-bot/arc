@@ -230,33 +230,18 @@ pub fn parse_int(
       // If R is 0, NaN, or Infinity, default to 10.
       let radix = case args {
         [_, r, ..] ->
-          case builtins_math.to_number(r) {
-            Finite(n) -> {
-              let r = float.truncate(n)
-              case r == 0 {
-                True -> 10
-                False -> r
-              }
-            }
-            _ -> 10
+          case arg_to_int(r, 10) {
+            0 -> 10
+            n -> n
           }
         _ -> 10
       }
-      // Step 10: If stripPrefix, check for "0x"/"0X" prefix.
-      // Also applies when radix was explicitly 10 (matches spec: radix 0 -> 10,
-      // then stripPrefix is true).
-      let #(str, radix) = case radix {
-        16 ->
-          case string.starts_with(str, "0x") || string.starts_with(str, "0X") {
-            True -> #(string.drop_start(str, 2), 16)
-            False -> #(str, 16)
-          }
-        10 ->
-          case string.starts_with(str, "0x") || string.starts_with(str, "0X") {
-            True -> #(string.drop_start(str, 2), 16)
-            False -> #(str, 10)
-          }
-        _ -> #(str, radix)
+      // Step 10: If radix is 10 or 16, check for "0x"/"0X" prefix.
+      let has_hex_prefix =
+        string.starts_with(str, "0x") || string.starts_with(str, "0X")
+      let #(str, radix) = case radix, has_hex_prefix {
+        10, True | 16, True -> #(string.drop_start(str, 2), 16)
+        _, _ -> #(str, radix)
       }
       // Step 8a: If R < 2 or R > 36, return NaN.
       case radix >= 2 && radix <= 36 {
@@ -447,14 +432,8 @@ pub fn number_value_of(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   // Step 1: Return ? thisNumberValue(this value).
-  case this_number_value(state, this) {
-    Some(n) -> #(state, Ok(JsNumber(n)))
-    None ->
-      frame.type_error(
-        state,
-        "Number.prototype.valueOf requires that 'this' be a Number",
-      )
-  }
+  use n, state <- require_number(this, state, "valueOf")
+  #(state, Ok(JsNumber(n)))
 }
 
 /// Number.prototype.toString([radix]) — ES2024 §21.1.3.6
@@ -480,30 +459,18 @@ pub fn number_to_string(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   // Step 1: Let x be ? thisNumberValue(this value).
-  case this_number_value(state, this) {
-    None ->
-      frame.type_error(
-        state,
-        "Number.prototype.toString requires that 'this' be a Number",
-      )
-    Some(n) -> {
-      // Steps 2-3: radix defaults to 10; undefined -> 10.
-      let radix = case args {
-        [] | [JsUndefined, ..] -> 10
-        [r, ..] ->
-          case builtins_math.to_number(r) {
-            Finite(f) -> float.truncate(f)
-            _ -> 10
-          }
-      }
-      // Step 4: If radixMV not in [2, 36], throw RangeError.
-      case radix >= 2 && radix <= 36 {
-        False ->
-          frame.range_error(state, "toString() radix must be between 2 and 36")
-        // Step 5: Return Number::toString(x, radixMV).
-        True -> #(state, Ok(JsString(value.format_number_radix(n, radix))))
-      }
-    }
+  use n, state <- require_number(this, state, "toString")
+  // Steps 2-3: radix defaults to 10; undefined -> 10.
+  let radix = case args {
+    [] | [JsUndefined, ..] -> 10
+    [r, ..] -> arg_to_int(r, 10)
+  }
+  // Step 4: If radixMV not in [2, 36], throw RangeError.
+  case radix >= 2 && radix <= 36 {
+    False ->
+      frame.range_error(state, "toString() radix must be between 2 and 36")
+    // Step 5: Return Number::toString(x, radixMV).
+    True -> #(state, Ok(JsString(value.format_number_radix(n, radix))))
   }
 }
 
@@ -560,38 +527,18 @@ pub fn number_to_fixed(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_number_value(state, this) {
-    None ->
-      frame.type_error(
+  use n, state <- require_number(this, state, "toFixed")
+  let f = case args {
+    [v, ..] -> arg_to_int(v, 0)
+    [] -> 0
+  }
+  case f < 0 || f > 100 {
+    True ->
+      frame.range_error(
         state,
-        "Number.prototype.toFixed requires that 'this' be a Number",
+        "toFixed() digits argument must be between 0 and 100",
       )
-    Some(n) -> {
-      let f = case args {
-        [v, ..] ->
-          case builtins_math.to_number(v) {
-            Finite(x) -> float.truncate(x)
-            _ -> 0
-          }
-        [] -> 0
-      }
-      case f < 0 || f > 100 {
-        True ->
-          frame.range_error(
-            state,
-            "toFixed() digits argument must be between 0 and 100",
-          )
-        False -> {
-          let s = case n {
-            NaN -> "NaN"
-            Infinity -> "Infinity"
-            NegInfinity -> "-Infinity"
-            Finite(x) -> format_to_fixed(x, f)
-          }
-          #(state, Ok(JsString(s)))
-        }
-      }
-    }
+    False -> #(state, Ok(JsString(format_non_finite(n, format_to_fixed(_, f)))))
   }
 }
 
@@ -601,38 +548,21 @@ pub fn number_to_exponential(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_number_value(state, this) {
-    None ->
-      frame.type_error(
+  use n, state <- require_number(this, state, "toExponential")
+  let f = case args {
+    [JsUndefined, ..] | [] -> -1
+    [v, ..] -> arg_to_int(v, 0)
+  }
+  case f > 100 || f < -1 {
+    True ->
+      frame.range_error(
         state,
-        "Number.prototype.toExponential requires that 'this' be a Number",
+        "toExponential() argument must be between 0 and 100",
       )
-    Some(n) -> {
-      let f = case args {
-        [JsUndefined, ..] | [] -> -1
-        [v, ..] ->
-          case builtins_math.to_number(v) {
-            Finite(x) -> float.truncate(x)
-            _ -> 0
-          }
-      }
-      case f > 100 || { f < -1 } {
-        True ->
-          frame.range_error(
-            state,
-            "toExponential() argument must be between 0 and 100",
-          )
-        False -> {
-          let s = case n {
-            NaN -> "NaN"
-            Infinity -> "Infinity"
-            NegInfinity -> "-Infinity"
-            Finite(x) -> format_to_exponential(x, f)
-          }
-          #(state, Ok(JsString(s)))
-        }
-      }
-    }
+    False -> #(
+      state,
+      Ok(JsString(format_non_finite(n, format_to_exponential(_, f)))),
+    )
   }
 }
 
@@ -642,41 +572,25 @@ pub fn number_to_precision(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case this_number_value(state, this) {
-    None ->
-      frame.type_error(
-        state,
-        "Number.prototype.toPrecision requires that 'this' be a Number",
-      )
-    Some(n) -> {
-      case args {
-        [JsUndefined, ..] | [] -> {
-          // If precision is undefined, use toString
-          let s = value.format_number_radix(n, 10)
-          #(state, Ok(JsString(s)))
-        }
-        [v, ..] -> {
-          let p = case builtins_math.to_number(v) {
-            Finite(x) -> float.truncate(x)
-            _ -> 0
-          }
-          case p < 1 || p > 100 {
-            True ->
-              frame.range_error(
-                state,
-                "toPrecision() argument must be between 1 and 100",
-              )
-            False -> {
-              let s = case n {
-                NaN -> "NaN"
-                Infinity -> "Infinity"
-                NegInfinity -> "-Infinity"
-                Finite(x) -> format_to_precision(x, p)
-              }
-              #(state, Ok(JsString(s)))
-            }
-          }
-        }
+  use n, state <- require_number(this, state, "toPrecision")
+  case args {
+    // If precision is undefined, behave as toString.
+    [JsUndefined, ..] | [] -> #(
+      state,
+      Ok(JsString(value.format_number_radix(n, 10))),
+    )
+    [v, ..] -> {
+      let p = arg_to_int(v, 0)
+      case p < 1 || p > 100 {
+        True ->
+          frame.range_error(
+            state,
+            "toPrecision() argument must be between 1 and 100",
+          )
+        False -> #(
+          state,
+          Ok(JsString(format_non_finite(n, format_to_precision(_, p)))),
+        )
       }
     }
   }
@@ -685,6 +599,42 @@ pub fn number_to_precision(
 // ============================================================================
 // Internal helpers
 // ============================================================================
+
+/// Unwrap `this` as a Number or return a TypeError.
+/// CPS-style — call with `use n, state <- require_number(this, state, "method")`.
+fn require_number(
+  this: JsValue,
+  state: State,
+  method: String,
+  cont: fn(JsNum, State) -> #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  case this_number_value(state, this) {
+    Some(n) -> cont(n, state)
+    None ->
+      frame.type_error(
+        state,
+        "Number.prototype." <> method <> " requires that 'this' be a Number",
+      )
+  }
+}
+
+/// Coerce a JsValue to an integer via ToNumber + truncate, with fallback.
+fn arg_to_int(v: JsValue, default: Int) -> Int {
+  case builtins_math.to_number(v) {
+    Finite(x) -> float.truncate(x)
+    _ -> default
+  }
+}
+
+/// Stringify NaN/Infinity canonically, else apply `f` to the finite float.
+fn format_non_finite(n: JsNum, f: fn(Float) -> String) -> String {
+  case n {
+    NaN -> "NaN"
+    Infinity -> "Infinity"
+    NegInfinity -> "-Infinity"
+    Finite(x) -> f(x)
+  }
+}
 
 /// parseInt digit parsing — implements ES2024 §19.2.5 steps 3-5, 11-16.
 ///

@@ -249,6 +249,7 @@ pub fn evaluate_bundle(
   heap: Heap,
   builtins: Builtins,
   global_object: Ref,
+  event_loop: Bool,
 ) -> Result(#(JsValue, Heap), ModuleError) {
   let builtin_exports = extract_builtin_exports(heap, builtins)
   let state =
@@ -259,7 +260,14 @@ pub fn evaluate_bundle(
       evaluating: set.new(),
     )
   let #(_state, result) =
-    eval_module_inner(bundle, state, bundle.entry, builtins, global_object)
+    eval_module_inner(
+      bundle,
+      state,
+      bundle.entry,
+      builtins,
+      global_object,
+      event_loop,
+    )
   result
 }
 
@@ -270,6 +278,7 @@ fn eval_module_inner(
   specifier: String,
   builtins: Builtins,
   global_object: Ref,
+  event_loop: Bool,
 ) -> #(EvalState, Result(#(JsValue, Heap), ModuleError)) {
   // Already evaluated successfully
   case dict.has_key(state.evaluated, specifier) {
@@ -298,6 +307,7 @@ fn eval_module_inner(
                     compiled,
                     builtins,
                     global_object,
+                    event_loop,
                   )
               }
           }
@@ -313,6 +323,7 @@ fn eval_module_body(
   compiled: CompiledModule,
   builtins: Builtins,
   global_object: Ref,
+  event_loop: Bool,
 ) -> #(EvalState, Result(#(JsValue, Heap), ModuleError)) {
   // Mark as evaluating
   let state =
@@ -335,6 +346,7 @@ fn eval_module_body(
               dep_specifier,
               builtins,
               global_object,
+              event_loop,
             )
           case result {
             Ok(_) -> #(state, Ok(Nil))
@@ -377,6 +389,7 @@ fn eval_module_body(
           builtins,
           global_object,
           import_globals,
+          event_loop,
         )
       {
         vm.ModuleError(error: vm_err) -> {

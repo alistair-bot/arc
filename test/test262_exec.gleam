@@ -593,7 +593,7 @@ fn do_run_module(
   case module.compile_bundle(path, source, test262_resolve_and_load) {
     Error(err) -> Error("module: " <> string.inspect(err))
     Ok(bundle) ->
-      case module.evaluate_bundle(bundle, h, b, global_object) {
+      case module.evaluate_bundle(bundle, h, b, global_object, True) {
         Ok(#(val, new_heap)) -> Ok(vm.NormalCompletion(val, new_heap))
         Error(module.EvaluationError(val)) -> Ok(vm.ThrowCompletion(val, h))
         Error(err) -> Error("module: " <> string.inspect(err))

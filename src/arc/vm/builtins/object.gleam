@@ -1,5 +1,5 @@
 import arc/vm/builtins/common.{type BuiltinType}
-import arc/vm/builtins/helpers
+import arc/vm/builtins/helpers.{first_arg}
 import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
 import arc/vm/js_elements
@@ -27,14 +27,6 @@ import gleam/string
 
 /// V8/Node's standard ToObject failure message.
 const cannot_convert = "Cannot convert undefined or null to object"
-
-/// Extract the first argument, defaulting to undefined.
-fn first_arg(args: List(JsValue)) -> JsValue {
-  case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
-}
 
 /// Set up Object constructor and Object.prototype methods.
 /// Object.prototype is already allocated (it's the root of all chains).

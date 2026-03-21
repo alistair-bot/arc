@@ -375,9 +375,15 @@ fn collect_declared_names(ops: List(emit.EmitterOp)) -> set.Set(String) {
 // ============================================================================
 
 /// Collect variable names that are used but not declared in a child's EmitterOps.
+/// Recurses into grandchildren so that a variable referenced only by a nested
+/// closure is still captured through the intermediate scope (transitive capture).
 fn collect_free_vars(child: emit.CompiledChild) -> set.Set(String) {
   let #(used, declared) = scan_ops(child.code, set.new(), set.new())
-  set.difference(used, declared)
+  let grandchild_free =
+    list.fold(child.functions, set.new(), fn(acc, gc) {
+      set.union(acc, collect_free_vars(gc))
+    })
+  set.union(used, grandchild_free) |> set.difference(declared)
 }
 
 /// Scan EmitterOps to find used variable names and declared names.

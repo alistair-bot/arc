@@ -400,22 +400,22 @@ fn read_file(path: String) -> Result(String, FileError)
 type FileError
 
 /// Run a JS source file and print the result (or error).
-fn run_file(path: String) -> Nil {
+fn run_file(path: String, event_loop: Bool) -> Nil {
   case read_file(path) {
     Error(err) ->
       io.println("Error reading " <> path <> ": " <> string.inspect(err))
     Ok(source) -> {
       let is_module = !string.ends_with(path, ".cjs")
       case is_module {
-        True -> run_module_file(path, source)
-        False -> run_script_file(source)
+        True -> run_module_file(path, source, event_loop)
+        False -> run_script_file(source, event_loop)
       }
     }
   }
 }
 
 /// Run a file as an ES module using the bundle lifecycle.
-fn run_module_file(path: String, source: String) -> Nil {
+fn run_module_file(path: String, source: String, event_loop: Bool) -> Nil {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
@@ -423,7 +423,7 @@ fn run_module_file(path: String, source: String) -> Nil {
   case module.compile_bundle(path, source, resolve_and_load_dep) {
     Error(err) -> print_module_error(h, err)
     Ok(bundle) ->
-      case module.evaluate_bundle(bundle, h, b, global_object) {
+      case module.evaluate_bundle(bundle, h, b, global_object, event_loop) {
         Ok(_) -> Nil
         Error(err) -> print_module_error(h, err)
       }
@@ -498,7 +498,7 @@ fn normalize_path(path: String) -> String {
 }
 
 /// Run a file as a script (only for .cjs files).
-fn run_script_file(source: String) -> Nil {
+fn run_script_file(source: String, event_loop: Bool) -> Nil {
   case parser.parse(source, parser.Script) {
     Error(err) ->
       io.println("SyntaxError: " <> parser.parse_error_to_string(err))
@@ -514,7 +514,11 @@ fn run_script_file(source: String) -> Nil {
           let h = heap.new()
           let #(h, b) = builtins.init(h)
           let #(h, global_object) = builtins.globals(b, h)
-          case vm.run_and_drain(template, h, b, global_object) {
+          let run = case event_loop {
+            True -> vm.run_with_event_loop
+            False -> vm.run_and_drain
+          }
+          case run(template, h, b, global_object) {
             Ok(vm.NormalCompletion(_, _)) -> Nil
             Ok(vm.ThrowCompletion(val, new_heap)) ->
               io.println("Uncaught exception: " <> inspect(new_heap, val))
@@ -564,7 +568,8 @@ pub fn main() -> Nil {
       Nil
     }
 
-    [path, ..] -> run_file(path)
+    ["--event-loop", path, ..] -> run_file(path, True)
+    [path, ..] -> run_file(path, False)
 
     [] -> {
       banner()

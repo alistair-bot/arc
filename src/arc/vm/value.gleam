@@ -136,6 +136,27 @@ pub type PortableMessage {
   PmSymbol(SymbolId)
 }
 
+/// Envelope for all messages that land in a VM process's mailbox. The event
+/// loop blocks on these when the microtask queue drains but outstanding work
+/// remains (pending receiveAsync, in-flight fetch, active timers).
+pub type MailboxEvent {
+  /// A message sent via `Arc.send`. Delivered to the next `Arc.receiveAsync()`
+  /// caller (or left in the mailbox via selective receive if none is waiting).
+  /// Blocking `Arc.receive()` also unwraps this.
+  UserMessage(PortableMessage)
+  /// An external operation (fetch, timer) completed. Resolves or rejects the
+  /// promise identified by `data_ref` (a PromiseSlot ref — just an Int, so
+  /// safe to round-trip through a worker process that doesn't touch the heap).
+  SettlePromise(
+    data_ref: Ref,
+    outcome: Result(PortableMessage, PortableMessage),
+  )
+  /// A `receiveAsync(ms)` timeout fired. If `data_ref` is still in
+  /// `pending_receivers`, resolves that promise with undefined and retires
+  /// it; otherwise a no-op (a message already arrived).
+  ReceiverTimeout(data_ref: Ref)
+}
+
 /// JS number representation. BEAM floats can't represent NaN or Infinity,
 /// so we use an explicit tagged type.
 pub type JsNum {
@@ -409,6 +430,8 @@ pub type ArcNativeFn {
   ArcPeek
   ArcSend
   ArcReceive
+  ArcReceiveAsync
+  ArcSetTimeout
   ArcSelf
   ArcLog
   ArcSleep

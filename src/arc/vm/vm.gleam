@@ -163,6 +163,8 @@ fn new_state(
     callee_ref: None,
     call_args: [],
     job_queue: [],
+    pending_receivers: [],
+    outstanding: 0,
     symbol_descriptions:,
     symbol_registry:,
     realms: dict.new(),
@@ -223,6 +225,28 @@ pub fn run_and_drain(
   }
 }
 
+/// Like `run_and_drain`, but runs the mailbox-backed event loop after the
+/// script completes. Blocks on the BEAM mailbox until `outstanding` hits
+/// zero, so `Arc.receiveAsync()` / `Arc.setTimeout()` keep the process
+/// alive. Opt-in — use `run_and_drain` for the microtask-only path.
+pub fn run_with_event_loop(
+  func: FuncTemplate,
+  heap: Heap,
+  builtins: Builtins,
+  global_object: Ref,
+) -> Result(Completion, VmError) {
+  let result =
+    init_state(func, heap, builtins, global_object, False) |> execute_inner()
+  use #(completion, final_state) <- result.try(result)
+  let drained_state = run_event_loop(final_state)
+  case completion {
+    NormalCompletion(val, _) -> Ok(NormalCompletion(val, drained_state.heap))
+    ThrowCompletion(val, _) -> Ok(ThrowCompletion(val, drained_state.heap))
+    YieldCompletion(_, _) ->
+      panic as "YieldCompletion should not appear at script level"
+  }
+}
+
 /// Run a module template with a globalThis object, then drain jobs.
 /// Module `this` is undefined per ES §16.2.1.5.2.
 pub fn run_module(
@@ -261,6 +285,7 @@ pub fn run_module_with_imports(
   builtins: Builtins,
   global_object: Ref,
   import_globals: dict.Dict(String, JsValue),
+  event_loop: Bool,
 ) -> ModuleResult {
   let locals = array.repeat(JsUndefined, func.local_count)
   let state =
@@ -282,7 +307,10 @@ pub fn run_module_with_imports(
   case result {
     Error(vm_err) -> ModuleError(error: vm_err)
     Ok(#(completion, final_state)) -> {
-      let drained_state = drain_jobs(final_state)
+      let drained_state = case event_loop {
+        True -> run_event_loop(final_state)
+        False -> drain_jobs(final_state)
+      }
       case completion {
         NormalCompletion(val, _) ->
           ModuleOk(
@@ -2181,6 +2209,8 @@ fn step(state: State, op: Op) -> Result(State, #(StepResult, JsValue, Heap)) {
                             lexical_globals: next_state.lexical_globals,
                             const_lexical_globals: next_state.const_lexical_globals,
                             job_queue: next_state.job_queue,
+                            pending_receivers: next_state.pending_receivers,
+                            outstanding: next_state.outstanding,
                           ),
                         )
                       }
@@ -2938,6 +2968,8 @@ fn call_generator_function(
           lexical_globals: suspended.lexical_globals,
           const_lexical_globals: suspended.const_lexical_globals,
           job_queue: suspended.job_queue,
+          pending_receivers: suspended.pending_receivers,
+          outstanding: suspended.outstanding,
         ),
       )
     }
@@ -3064,6 +3096,8 @@ fn call_async_function(
           lexical_globals: suspended.lexical_globals,
           const_lexical_globals: suspended.const_lexical_globals,
           job_queue: list.append(suspended.job_queue, jobs),
+          pending_receivers: suspended.pending_receivers,
+          outstanding: suspended.outstanding,
         ),
       )
     }
@@ -3080,6 +3114,8 @@ fn call_async_function(
           lexical_globals: final_state.lexical_globals,
           const_lexical_globals: final_state.const_lexical_globals,
           job_queue: list.append(final_state.job_queue, jobs),
+          pending_receivers: final_state.pending_receivers,
+          outstanding: final_state.outstanding,
         ),
       )
     }
@@ -3095,6 +3131,8 @@ fn call_async_function(
           lexical_globals: final_state.lexical_globals,
           const_lexical_globals: final_state.const_lexical_globals,
           job_queue: list.append(final_state.job_queue, jobs),
+          pending_receivers: final_state.pending_receivers,
+          outstanding: final_state.outstanding,
         ),
       )
     }
@@ -3253,6 +3291,8 @@ fn call_native_async_resume(
               lexical_globals: final_state.lexical_globals,
               const_lexical_globals: final_state.const_lexical_globals,
               job_queue: list.append(final_state.job_queue, jobs),
+              pending_receivers: final_state.pending_receivers,
+              outstanding: final_state.outstanding,
             ),
           )
         }
@@ -3269,6 +3309,8 @@ fn call_native_async_resume(
               lexical_globals: final_state.lexical_globals,
               const_lexical_globals: final_state.const_lexical_globals,
               job_queue: list.append(final_state.job_queue, jobs),
+              pending_receivers: final_state.pending_receivers,
+              outstanding: final_state.outstanding,
             ),
           )
         }
@@ -3306,6 +3348,8 @@ fn call_native_async_resume(
               lexical_globals: suspended.lexical_globals,
               const_lexical_globals: suspended.const_lexical_globals,
               job_queue: list.append(suspended.job_queue, jobs),
+              pending_receivers: suspended.pending_receivers,
+              outstanding: suspended.outstanding,
             ),
           )
         }
@@ -4061,6 +4105,8 @@ fn drain_generator_to_array(
                   lexical_globals: next_state.lexical_globals,
                   const_lexical_globals: next_state.const_lexical_globals,
                   job_queue: next_state.job_queue,
+                  pending_receivers: next_state.pending_receivers,
+                  outstanding: next_state.outstanding,
                 ),
               )
             False -> {
@@ -4077,6 +4123,8 @@ fn drain_generator_to_array(
                   lexical_globals: next_state.lexical_globals,
                   const_lexical_globals: next_state.const_lexical_globals,
                   job_queue: next_state.job_queue,
+                  pending_receivers: next_state.pending_receivers,
+                  outstanding: next_state.outstanding,
                 ),
                 gen_ref,
                 target_ref,
@@ -4378,7 +4426,7 @@ fn run_spawned_closure(
 
   case execute_inner(state) {
     Ok(#(_, final_state)) -> {
-      let _ = drain_jobs(final_state)
+      let _ = run_event_loop(final_state)
       Nil
     }
     Error(_) -> Nil
@@ -4415,7 +4463,7 @@ fn run_spawned_native(
 
   case call_native(state, native, [], state.stack, JsUndefined) {
     Ok(final_state) -> {
-      let _ = drain_jobs(final_state)
+      let _ = run_event_loop(final_state)
       Nil
     }
     Error(_) -> Nil
@@ -4547,6 +4595,8 @@ fn eval_script_native(
                       ..state,
                       heap:,
                       job_queue: drained.job_queue,
+                      pending_receivers: drained.pending_receivers,
+                      outstanding: drained.outstanding,
                       realms: drained.realms,
                     )
                   case completion {
@@ -5396,6 +5446,8 @@ fn call_native_generator_next(
                   lexical_globals: suspended.lexical_globals,
                   const_lexical_globals: suspended.const_lexical_globals,
                   job_queue: suspended.job_queue,
+                  pending_receivers: suspended.pending_receivers,
+                  outstanding: suspended.outstanding,
                 ),
               )
             }
@@ -5418,6 +5470,8 @@ fn call_native_generator_next(
                   lexical_globals: final_state.lexical_globals,
                   const_lexical_globals: final_state.const_lexical_globals,
                   job_queue: final_state.job_queue,
+                  pending_receivers: final_state.pending_receivers,
+                  outstanding: final_state.outstanding,
                 ),
               )
             }
@@ -5631,6 +5685,8 @@ fn call_native_generator_throw(
                       lexical_globals: suspended.lexical_globals,
                       const_lexical_globals: suspended.const_lexical_globals,
                       job_queue: suspended.job_queue,
+                      pending_receivers: suspended.pending_receivers,
+                      outstanding: suspended.outstanding,
                     ),
                   )
                 }
@@ -5657,6 +5713,8 @@ fn call_native_generator_throw(
                       lexical_globals: final_state.lexical_globals,
                       const_lexical_globals: final_state.const_lexical_globals,
                       job_queue: final_state.job_queue,
+                      pending_receivers: final_state.pending_receivers,
+                      outstanding: final_state.outstanding,
                     ),
                   )
                 }
@@ -5861,6 +5919,8 @@ fn process_generator_return(
               lexical_globals: final_state.lexical_globals,
               const_lexical_globals: final_state.const_lexical_globals,
               job_queue: final_state.job_queue,
+              pending_receivers: final_state.pending_receivers,
+              outstanding: final_state.outstanding,
             )
           process_generator_return(
             updated_gen_state,
@@ -5908,6 +5968,8 @@ fn process_generator_return(
               lexical_globals: suspended.lexical_globals,
               const_lexical_globals: suspended.const_lexical_globals,
               job_queue: suspended.job_queue,
+              pending_receivers: suspended.pending_receivers,
+              outstanding: suspended.outstanding,
             ),
           )
         }
@@ -5970,6 +6032,100 @@ fn drain_jobs(state: State) -> State {
       let state = execute_job(state, job)
       drain_jobs(state)
     }
+  }
+}
+
+@external(erlang, "arc_vm_ffi", "receive_any_event")
+fn ffi_receive_any() -> value.MailboxEvent
+
+@external(erlang, "arc_vm_ffi", "receive_settle_only")
+fn ffi_receive_settle_only() -> value.MailboxEvent
+
+/// Mailbox-backed event loop. Runs drain microtasks → block on BEAM mailbox
+/// → handle event → repeat, until `outstanding` hits zero. With no outstanding
+/// work this is identical to `drain_jobs` (never touches the mailbox).
+///
+/// This is what lets `await Arc.receiveAsync()` suspend the current async
+/// function while other async functions keep running — the BEAM mailbox IS
+/// the macrotask queue, and every arrival resolves a promise which schedules
+/// a PromiseReactionJob that resumes whoever was waiting.
+///
+/// Selective receive: when no receivers are pending we only accept
+/// `SettlePromise`, leaving `UserMessage` in the BEAM mailbox for blocking
+/// `Arc.receive()` or a future `receiveAsync` to pick up.
+pub fn run_event_loop(state: State) -> State {
+  let state = drain_jobs(state)
+  case state.outstanding {
+    0 -> state
+    _ -> {
+      let event = case state.pending_receivers {
+        [] -> ffi_receive_settle_only()
+        [_, ..] -> ffi_receive_any()
+      }
+      let state = handle_mailbox_event(state, event)
+      run_event_loop(state)
+    }
+  }
+}
+
+/// Apply a single mailbox event to VM state: resolve the right promise,
+/// enqueue its reaction jobs, adjust the outstanding count.
+fn handle_mailbox_event(state: State, event: value.MailboxEvent) -> State {
+  case event {
+    value.UserMessage(pm) -> {
+      // Selective receive guarantees pending_receivers is non-empty here.
+      let assert [data_ref, ..rest] = state.pending_receivers
+      let #(heap, val) =
+        builtins_arc.deserialize(state.heap, state.builtins, pm)
+      let #(heap, jobs) = builtins_promise.fulfill_promise(heap, data_ref, val)
+      State(
+        ..state,
+        heap:,
+        pending_receivers: rest,
+        outstanding: state.outstanding - 1,
+        job_queue: list.append(state.job_queue, jobs),
+      )
+    }
+    value.SettlePromise(data_ref:, outcome: Ok(pm)) -> {
+      let #(heap, val) =
+        builtins_arc.deserialize(state.heap, state.builtins, pm)
+      let #(heap, jobs) = builtins_promise.fulfill_promise(heap, data_ref, val)
+      State(
+        ..state,
+        heap:,
+        outstanding: state.outstanding - 1,
+        job_queue: list.append(state.job_queue, jobs),
+      )
+    }
+    value.SettlePromise(data_ref:, outcome: Error(pm)) -> {
+      let #(heap, reason) =
+        builtins_arc.deserialize(state.heap, state.builtins, pm)
+      let #(heap, jobs) =
+        builtins_promise.reject_promise(heap, data_ref, reason)
+      State(
+        ..state,
+        heap:,
+        outstanding: state.outstanding - 1,
+        job_queue: list.append(state.job_queue, jobs),
+      )
+    }
+    value.ReceiverTimeout(data_ref:) ->
+      case list.contains(state.pending_receivers, data_ref) {
+        False -> state
+        True -> {
+          let #(heap, jobs) =
+            builtins_promise.fulfill_promise(state.heap, data_ref, JsUndefined)
+          State(
+            ..state,
+            heap:,
+            pending_receivers: list.filter(state.pending_receivers, fn(r) {
+              r != data_ref
+            }),
+            outstanding: state.outstanding - 1,
+            job_queue: list.append(state.job_queue, jobs),
+          )
+        }
+      }
   }
 }
 
@@ -6087,6 +6243,8 @@ fn run_handler_with_this(
                       ..state,
                       heap: new_state.heap,
                       job_queue: new_state.job_queue,
+                      pending_receivers: new_state.pending_receivers,
+                      outstanding: new_state.outstanding,
                     ),
                   ))
                 [] ->
@@ -6096,6 +6254,8 @@ fn run_handler_with_this(
                       ..state,
                       heap: new_state.heap,
                       job_queue: new_state.job_queue,
+                      pending_receivers: new_state.pending_receivers,
+                      outstanding: new_state.outstanding,
                     ),
                   ))
               }
@@ -6167,6 +6327,8 @@ fn run_closure_for_job(
           job_queue: final_state.job_queue,
           lexical_globals: final_state.lexical_globals,
           const_lexical_globals: final_state.const_lexical_globals,
+          pending_receivers: final_state.pending_receivers,
+          outstanding: final_state.outstanding,
         ),
       ))
     Ok(#(ThrowCompletion(thrown, h), final_state)) ->
@@ -6178,6 +6340,8 @@ fn run_closure_for_job(
           job_queue: final_state.job_queue,
           lexical_globals: final_state.lexical_globals,
           const_lexical_globals: final_state.const_lexical_globals,
+          pending_receivers: final_state.pending_receivers,
+          outstanding: final_state.outstanding,
         ),
       ))
     Ok(#(YieldCompletion(_, _), _)) ->

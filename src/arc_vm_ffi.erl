@@ -2,6 +2,8 @@
 -export([read_line/1]).
 -export([array_get/2, array_set/3, array_repeat/2, array_grow/3]).
 -export([send_message/2, receive_message_infinite/0, receive_message_timeout/1, pid_to_string/1]).
+-export([receive_any_event/0, receive_settle_only/0, send_after/3]).
+-export([receive_user_message/0, receive_user_message_timeout/1]).
 -export([get_script_args/0, sleep/1]).
 
 read_line(Prompt) ->
@@ -47,3 +49,38 @@ receive_message_timeout(Timeout) ->
 pid_to_string(Pid) -> list_to_binary(pid_to_list(Pid)).
 get_script_args() -> [list_to_binary(A) || A <- init:get_plain_arguments()].
 sleep(Ms) -> timer:sleep(Ms), nil.
+
+%% Selective receive for the event loop. Gleam MailboxEvent variants compile to
+%% tagged tuples: UserMessage(pm) = {user_message, Pm},
+%% SettlePromise(ref, outcome) = {settle_promise, Ref, Outcome}.
+%%
+%% When the event loop has pending receivers it accepts any event. Otherwise it
+%% only accepts settle_promise, leaving user_message in the mailbox for blocking
+%% Arc.receive() or a future receiveAsync() call to pick up.
+receive_any_event() ->
+    receive
+        {user_message, _} = E -> E;
+        {settle_promise, _, _} = E -> E;
+        {receiver_timeout, _} = E -> E
+    end.
+receive_settle_only() ->
+    receive
+        {settle_promise, _, _} = E -> E;
+        {receiver_timeout, _} = E -> E
+    end.
+
+%% Selective receive for Arc.receive() — only matches user_message, leaves
+%% settle_promise in the mailbox for the event loop.
+receive_user_message() ->
+    receive
+        {user_message, Pm} -> Pm
+    end.
+receive_user_message_timeout(Timeout) ->
+    receive
+        {user_message, Pm} -> {ok, Pm}
+    after Timeout -> {error, nil}
+    end.
+
+send_after(Ms, Pid, Msg) ->
+    erlang:send_after(Ms, Pid, Msg),
+    nil.

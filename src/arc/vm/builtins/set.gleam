@@ -8,6 +8,7 @@
 /// The keys list preserves insertion order for forEach.
 import arc/vm/array as vm_array
 import arc/vm/builtins/common.{type BuiltinType}
+import arc/vm/builtins/helpers.{first_arg}
 import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
 import arc/vm/js_elements
@@ -203,33 +204,16 @@ fn set_add(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
+  use data, keys, ref, state <- require_set(this, state)
+  let val = first_arg(args)
+  let key = value.js_to_map_key(val)
+  let new_data = dict.insert(data, key, val)
+  let new_keys = case dict.has_key(data, key) {
+    True -> keys
+    False -> list.append(keys, [key])
   }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: SetObject(data:, keys:), ..)) -> {
-          let key = value.js_to_map_key(val)
-          let already_has = dict.has_key(data, key)
-          let new_data = dict.insert(data, key, val)
-          let new_keys = case already_has {
-            True -> keys
-            False -> list.append(keys, [key])
-          }
-          let heap = update_set(state.heap, ref, new_data, new_keys)
-          #(State(..state, heap:), Ok(this))
-        }
-        _ ->
-          frame.type_error(
-            state,
-            "Set.prototype.add requires that 'this' be a Set",
-          )
-      }
-    _ ->
-      frame.type_error(state, "Set.prototype.add requires that 'this' be a Set")
-  }
+  let heap = update_set(state.heap, ref, new_data, new_keys)
+  #(State(..state, heap:), Ok(this))
 }
 
 /// ES2024 §24.2.3.4 Set.prototype.has ( value )
@@ -238,26 +222,9 @@ fn set_has(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: SetObject(data:, ..), ..)) -> {
-          let key = value.js_to_map_key(val)
-          #(state, Ok(JsBool(dict.has_key(data, key))))
-        }
-        _ ->
-          frame.type_error(
-            state,
-            "Set.prototype.has requires that 'this' be a Set",
-          )
-      }
-    _ ->
-      frame.type_error(state, "Set.prototype.has requires that 'this' be a Set")
-  }
+  use data, _keys, _ref, state <- require_set(this, state)
+  let key = value.js_to_map_key(first_arg(args))
+  #(state, Ok(JsBool(dict.has_key(data, key))))
 }
 
 /// ES2024 §24.2.3.3 Set.prototype.delete ( value )
@@ -266,79 +233,26 @@ fn set_delete(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: SetObject(data:, keys:), ..)) -> {
-          let key = value.js_to_map_key(val)
-          let had = dict.has_key(data, key)
-          let new_data = dict.delete(data, key)
-          let new_keys = list.filter(keys, fn(k) { k != key })
-          let heap = update_set(state.heap, ref, new_data, new_keys)
-          #(State(..state, heap:), Ok(JsBool(had)))
-        }
-        _ ->
-          frame.type_error(
-            state,
-            "Set.prototype.delete requires that 'this' be a Set",
-          )
-      }
-    _ ->
-      frame.type_error(
-        state,
-        "Set.prototype.delete requires that 'this' be a Set",
-      )
-  }
+  use data, keys, ref, state <- require_set(this, state)
+  let key = value.js_to_map_key(first_arg(args))
+  let had = dict.has_key(data, key)
+  let new_data = dict.delete(data, key)
+  let new_keys = list.filter(keys, fn(k) { k != key })
+  let heap = update_set(state.heap, ref, new_data, new_keys)
+  #(State(..state, heap:), Ok(JsBool(had)))
 }
 
 /// ES2024 §24.2.3.2 Set.prototype.clear ()
 fn set_clear(this: JsValue, state: State) -> #(State, Result(JsValue, JsValue)) {
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: SetObject(..), ..)) -> {
-          let heap = update_set(state.heap, ref, dict.new(), [])
-          #(State(..state, heap:), Ok(JsUndefined))
-        }
-        _ ->
-          frame.type_error(
-            state,
-            "Set.prototype.clear requires that 'this' be a Set",
-          )
-      }
-    _ ->
-      frame.type_error(
-        state,
-        "Set.prototype.clear requires that 'this' be a Set",
-      )
-  }
+  use _data, _keys, ref, state <- require_set(this, state)
+  let heap = update_set(state.heap, ref, dict.new(), [])
+  #(State(..state, heap:), Ok(JsUndefined))
 }
 
 /// ES2024 §24.2.3.5 get Set.prototype.size
 fn set_size(this: JsValue, state: State) -> #(State, Result(JsValue, JsValue)) {
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: SetObject(data:, ..), ..)) -> {
-          let count = dict.size(data)
-          #(state, Ok(JsNumber(Finite(int.to_float(count)))))
-        }
-        _ ->
-          frame.type_error(
-            state,
-            "Set.prototype.size requires that 'this' be a Set",
-          )
-      }
-    _ ->
-      frame.type_error(
-        state,
-        "Set.prototype.size requires that 'this' be a Set",
-      )
-  }
+  use data, _keys, _ref, state <- require_set(this, state)
+  #(state, Ok(JsNumber(Finite(int.to_float(dict.size(data))))))
 }
 
 /// ES2024 §24.2.3.6 Set.prototype.forEach ( callbackfn [ , thisArg ] )
@@ -347,46 +261,25 @@ fn set_for_each(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let callback = case args {
-    [cb, ..] -> cb
-    [] -> JsUndefined
-  }
+  use data, keys, _ref, state <- require_set(this, state)
+  let callback = first_arg(args)
   let this_arg = case args {
     [_, ta, ..] -> ta
     _ -> JsUndefined
   }
-
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: SetObject(data:, keys:), ..)) -> {
-          case is_callable(state.heap, callback) {
-            False ->
-              frame.type_error(
-                state,
-                "Set.prototype.forEach callback is not a function",
-              )
-            True -> {
-              // Get values in insertion order
-              let entries =
-                list.filter_map(keys, fn(key) {
-                  dict.get(data, key) |> result.map(fn(v) { #(key, v) })
-                })
-              for_each_loop(state, entries, callback, this_arg, this)
-            }
-          }
-        }
-        _ ->
-          frame.type_error(
-            state,
-            "Set.prototype.forEach requires that 'this' be a Set",
-          )
-      }
-    _ ->
+  case helpers.is_callable(state.heap, callback) {
+    False ->
       frame.type_error(
         state,
-        "Set.prototype.forEach requires that 'this' be a Set",
+        "Set.prototype.forEach callback is not a function",
       )
+    True -> {
+      let entries =
+        list.filter_map(keys, fn(key) {
+          dict.get(data, key) |> result.map(fn(v) { #(key, v) })
+        })
+      for_each_loop(state, entries, callback, this_arg, this)
+    }
   }
 }
 
@@ -400,25 +293,33 @@ fn for_each_loop(
 ) -> #(State, Result(JsValue, JsValue)) {
   case entries {
     [] -> #(state, Ok(JsUndefined))
-    [#(_key, val), ..rest] -> {
+    [#(_key, val), ..rest] ->
       case frame.call(state, callback, this_arg, [val, val, set_this]) {
         Ok(#(_result, new_state)) ->
           for_each_loop(new_state, rest, callback, this_arg, set_this)
         Error(#(thrown, new_state)) -> #(new_state, Error(thrown))
       }
-    }
   }
 }
 
-/// Check if a value is callable.
-fn is_callable(h: Heap, val: JsValue) -> Bool {
-  case val {
+// ---- helpers ----
+
+/// Unwrap `this` as a Set or return a TypeError.
+/// CPS-style — call with `use data, keys, ref, state <- require_set(this, state)`.
+fn require_set(
+  this: JsValue,
+  state: State,
+  cont: fn(dict.Dict(MapKey, JsValue), List(MapKey), Ref, State) ->
+    #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  let err = "Method Set.prototype.* called on incompatible receiver"
+  case this {
     JsObject(ref) ->
-      case heap.read(h, ref) {
-        Some(ObjectSlot(kind: value.FunctionObject(..), ..)) -> True
-        Some(ObjectSlot(kind: value.NativeFunction(_), ..)) -> True
-        _ -> False
+      case heap.read(state.heap, ref) {
+        Some(ObjectSlot(kind: SetObject(data:, keys:), ..)) ->
+          cont(data, keys, ref, state)
+        _ -> frame.type_error(state, err)
       }
-    _ -> False
+    _ -> frame.type_error(state, err)
   }
 }

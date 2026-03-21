@@ -125,7 +125,7 @@ pub fn emit_program(
   ),
   EmitError,
 ) {
-  emit_program_common(stmts, False, emit_stmt, emit_stmt_tail)
+  emit_program_common(stmts, False, True, emit_stmt, emit_stmt_tail)
 }
 
 /// Emit IR for REPL mode: top-level var uses DeclareGlobalVar (on globalThis),
@@ -143,7 +143,7 @@ pub fn emit_program_repl(
   ),
   EmitError,
 ) {
-  emit_program_common(stmts, False, emit_stmt_repl, emit_stmt_tail_repl)
+  emit_program_common(stmts, False, False, emit_stmt_repl, emit_stmt_tail_repl)
 }
 
 /// Emit IR for a module body. Always strict mode.
@@ -266,6 +266,7 @@ fn emit_stmt_module(
 fn emit_program_common(
   stmts: List(ast.Statement),
   force_strict: Bool,
+  hoist_lex: Bool,
   emit_non_tail: fn(Emitter, ast.Statement) -> Result(Emitter, EmitError),
   emit_tail: fn(Emitter, ast.Statement) -> Result(Emitter, EmitError),
 ) -> Result(
@@ -293,6 +294,19 @@ fn emit_program_common(
     list.fold(hoisted_vars, e, fn(e, name) {
       emit_ir(e, IrDeclareGlobalVar(name))
     })
+
+  // In non-REPL script mode, top-level let/const become locals (emit_stmt
+  // emits DeclareVar for them). Hoist those slots before hoisted-func
+  // MakeClosure so captured variables are boxed by the time the closure
+  // reads them. REPL mode uses DeclareGlobalLex instead, so skip this there.
+  let e = case hoist_lex {
+    True ->
+      list.fold(collect_top_lex_names(stmts), e, fn(e, lex) {
+        let #(name, kind) = lex
+        emit_op(e, DeclareVar(name, kind))
+      })
+    False -> e
+  }
 
   // Collect and emit hoisted function declarations
   let #(e, hoisted_funcs) = collect_hoisted_funcs(e, stmts)
@@ -782,6 +796,33 @@ fn collect_vars_stmt(stmt: ast.Statement) -> List(String) {
   }
 }
 
+/// Collect let/const names declared directly in the given statement list (NOT
+/// recursing into nested blocks). Used to hoist slot-allocation+boxing before
+/// hoisted-function MakeClosure so closures capture the box ref, not a stale
+/// pre-box value.
+fn collect_top_lex_names(
+  stmts: List(ast.Statement),
+) -> List(#(String, BindingKind)) {
+  list.flat_map(stmts, fn(stmt) {
+    case stmt {
+      ast.VariableDeclaration(ast.Let, declarators) ->
+        list.flat_map(declarators, fn(d) {
+          let ast.VariableDeclarator(pattern, _) = d
+          collect_pattern_names(pattern)
+          |> list.map(fn(n) { #(n, LetBinding) })
+        })
+      ast.VariableDeclaration(ast.Const, declarators) ->
+        list.flat_map(declarators, fn(d) {
+          let ast.VariableDeclarator(pattern, _) = d
+          collect_pattern_names(pattern)
+          |> list.map(fn(n) { #(n, ConstBinding) })
+        })
+      ast.ClassDeclaration(name: Some(name), ..) -> [#(name, LetBinding)]
+      _ -> []
+    }
+  })
+}
+
 /// Collect and compile hoisted function declarations.
 /// Returns updated emitter + list of (name, func_index) pairs.
 fn collect_hoisted_funcs(
@@ -1164,11 +1205,21 @@ fn compile_function_body(
 
   // Hoisting for the function body
   let hoisted_vars = collect_hoisted_vars(stmts)
+  let lex_names = collect_top_lex_names(stmts)
   let #(e, hoisted_funcs) = collect_hoisted_funcs(e, stmts)
 
   let e =
     list.fold(hoisted_vars, e, fn(e, vname) {
       emit_op(e, DeclareVar(vname, VarBinding))
+    })
+
+  // Declare top-level let/const slots before hoisted-func MakeClosure so that
+  // captured variables are boxed by the time the closure reads them. The
+  // actual initializer still runs at the statement's position, so TDZ holds.
+  let e =
+    list.fold(lex_names, e, fn(e, lex) {
+      let #(name, kind) = lex
+      emit_op(e, DeclareVar(name, kind))
     })
 
   let e =

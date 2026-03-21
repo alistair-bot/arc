@@ -4,12 +4,13 @@
 /// In this implementation, values are stored by Ref (object identity).
 /// Not truly weak (GC doesn't collect entries) but API-compatible.
 import arc/vm/builtins/common.{type BuiltinType}
+import arc/vm/builtins/helpers.{first_arg}
 import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
 import arc/vm/js_elements
 import arc/vm/value.{
   type JsValue, type Ref, type WeakSetNativeFn, Dispatch, JsBool, JsObject,
-  JsUndefined, ObjectSlot, WeakSetConstructor, WeakSetNative, WeakSetObject,
+  ObjectSlot, WeakSetConstructor, WeakSetNative, WeakSetObject,
   WeakSetPrototypeAdd, WeakSetPrototypeDelete, WeakSetPrototypeHas,
 }
 import gleam/dict
@@ -83,33 +84,14 @@ fn weak_set_add(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: WeakSetObject(data:), ..)) ->
-          case val {
-            JsObject(val_ref) -> {
-              let new_data = dict.insert(data, val_ref, True)
-              let heap = update_weak_set(state.heap, ref, new_data)
-              #(State(..state, heap:), Ok(this))
-            }
-            _ -> frame.type_error(state, "Invalid value used in weak set")
-          }
-        _ ->
-          frame.type_error(
-            state,
-            "WeakSet.prototype.add requires that 'this' be a WeakSet",
-          )
-      }
-    _ ->
-      frame.type_error(
-        state,
-        "WeakSet.prototype.add requires that 'this' be a WeakSet",
-      )
+  use data, ref, state <- require_weak_set(this, state)
+  case first_arg(args) {
+    JsObject(val_ref) -> {
+      let new_data = dict.insert(data, val_ref, True)
+      let heap = update_weak_set(state.heap, ref, new_data)
+      #(State(..state, heap:), Ok(this))
+    }
+    _ -> frame.type_error(state, "Invalid value used in weak set")
   }
 }
 
@@ -119,32 +101,10 @@ fn weak_set_has(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
-  case this {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(kind: WeakSetObject(data:), ..)) ->
-          case val {
-            JsObject(val_ref) -> #(
-              state,
-              Ok(JsBool(dict.has_key(data, val_ref))),
-            )
-            _ -> #(state, Ok(JsBool(False)))
-          }
-        _ ->
-          frame.type_error(
-            state,
-            "WeakSet.prototype.has requires that 'this' be a WeakSet",
-          )
-      }
-    _ ->
-      frame.type_error(
-        state,
-        "WeakSet.prototype.has requires that 'this' be a WeakSet",
-      )
+  use data, _ref, state <- require_weak_set(this, state)
+  case first_arg(args) {
+    JsObject(val_ref) -> #(state, Ok(JsBool(dict.has_key(data, val_ref))))
+    _ -> #(state, Ok(JsBool(False)))
   }
 }
 
@@ -154,34 +114,37 @@ fn weak_set_delete(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
+  use data, ref, state <- require_weak_set(this, state)
+  case first_arg(args) {
+    JsObject(val_ref) -> {
+      let had = dict.has_key(data, val_ref)
+      let new_data = dict.delete(data, val_ref)
+      let heap = update_weak_set(state.heap, ref, new_data)
+      #(State(..state, heap:), Ok(JsBool(had)))
+    }
+    _ -> #(state, Ok(JsBool(False)))
   }
+}
+
+// ---- helpers ----
+
+/// Unwrap `this` as a WeakSet or return a TypeError.
+/// CPS-style — call with `use data, ref, state <- require_weak_set(this, state)`.
+fn require_weak_set(
+  this: JsValue,
+  state: State,
+  cont: fn(dict.Dict(Ref, Bool), Ref, State) ->
+    #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  let err = "Method WeakSet.prototype.* called on incompatible receiver"
   case this {
     JsObject(ref) ->
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: WeakSetObject(data:), ..)) ->
-          case val {
-            JsObject(val_ref) -> {
-              let had = dict.has_key(data, val_ref)
-              let new_data = dict.delete(data, val_ref)
-              let heap = update_weak_set(state.heap, ref, new_data)
-              #(State(..state, heap:), Ok(JsBool(had)))
-            }
-            _ -> #(state, Ok(JsBool(False)))
-          }
-        _ ->
-          frame.type_error(
-            state,
-            "WeakSet.prototype.delete requires that 'this' be a WeakSet",
-          )
+          cont(data, ref, state)
+        _ -> frame.type_error(state, err)
       }
-    _ ->
-      frame.type_error(
-        state,
-        "WeakSet.prototype.delete requires that 'this' be a WeakSet",
-      )
+    _ -> frame.type_error(state, err)
   }
 }
 

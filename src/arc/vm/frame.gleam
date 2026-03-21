@@ -98,6 +98,16 @@ pub type State {
     /// Promise microtask job queue. Jobs enqueued during promise operations,
     /// drained after script completes (or by run_and_drain).
     job_queue: List(value.Job),
+    /// PromiseSlot data_refs created by `Arc.receiveAsync()` waiting for a
+    /// `UserMessage` to arrive. FIFO — first caller gets first message. When
+    /// this is empty, the event loop uses selective receive to leave any
+    /// `UserMessage` in the BEAM mailbox so blocking `Arc.receive()` can pick
+    /// it up later.
+    pending_receivers: List(Ref),
+    /// Count of in-flight external operations: each `receiveAsync`,
+    /// `setTimeout`, `fetch`, etc. increments this. The event loop blocks
+    /// on the BEAM mailbox while outstanding > 0; exits when it hits 0.
+    outstanding: Int,
     /// Descriptions for user-created symbols (Symbol("desc")).
     symbol_descriptions: dict.Dict(value.SymbolId, String),
     /// Global symbol registry for Symbol.for() / Symbol.keyFor().

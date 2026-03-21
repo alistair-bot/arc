@@ -6320,7 +6320,7 @@ fn run_module(source: String) -> Result(vm.Completion, String) {
   {
     Error(err) -> Error("module error: " <> string.inspect(err))
     Ok(bundle) ->
-      case module.evaluate_bundle(bundle, h, b, global_object) {
+      case module.evaluate_bundle(bundle, h, b, global_object, False) {
         Ok(#(val, new_heap)) -> Ok(vm.NormalCompletion(val, new_heap))
         Error(module.EvaluationError(val)) -> Ok(vm.ThrowCompletion(val, h))
         Error(err) -> Error("module error: " <> string.inspect(err))
@@ -6433,7 +6433,7 @@ pub fn module_repl_harness_globals_test() -> Nil {
     })
 
   // Evaluate the module, passing in REPL globals
-  case module.evaluate_bundle(bundle, h, b, env.global_object) {
+  case module.evaluate_bundle(bundle, h, b, env.global_object, False) {
     Ok(#(val, _heap)) -> {
       let assert True = val == JsString("hello from harness")
       Nil

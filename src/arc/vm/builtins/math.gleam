@@ -223,58 +223,40 @@ pub fn math_sqrt(
   }
 }
 
-/// Math.max(a, b, ...)
+/// Math.max(a, b, ...) — returns -Infinity for no args.
 pub fn math_max(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case args {
-    [] -> #(state, Ok(JsNumber(NegInfinity)))
-    _ -> {
-      let result =
-        list.fold(args, NegInfinity, fn(acc, arg) {
-          let n = to_number(arg)
-          case acc, n {
-            NaN, _ | _, NaN -> NaN
-            Finite(a), Finite(b) ->
-              case a >=. b {
-                True -> Finite(a)
-                False -> Finite(b)
-              }
-            Infinity, _ | _, Infinity -> Infinity
-            NegInfinity, other | other, NegInfinity -> other
-          }
-        })
-      #(state, Ok(JsNumber(result)))
-    }
-  }
+  let result =
+    list.fold(args, NegInfinity, fn(acc, arg) {
+      case acc, to_number(arg) {
+        NaN, _ | _, NaN -> NaN
+        Finite(a), Finite(b) if a >=. b -> Finite(a)
+        Finite(_), Finite(b) -> Finite(b)
+        Infinity, _ | _, Infinity -> Infinity
+        NegInfinity, other | other, NegInfinity -> other
+      }
+    })
+  #(state, Ok(JsNumber(result)))
 }
 
-/// Math.min(a, b, ...)
+/// Math.min(a, b, ...) — returns +Infinity for no args.
 pub fn math_min(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case args {
-    [] -> #(state, Ok(JsNumber(Infinity)))
-    _ -> {
-      let result =
-        list.fold(args, Infinity, fn(acc, arg) {
-          let n = to_number(arg)
-          case acc, n {
-            NaN, _ | _, NaN -> NaN
-            Finite(a), Finite(b) ->
-              case a <=. b {
-                True -> Finite(a)
-                False -> Finite(b)
-              }
-            NegInfinity, _ | _, NegInfinity -> NegInfinity
-            Infinity, other | other, Infinity -> other
-          }
-        })
-      #(state, Ok(JsNumber(result)))
-    }
-  }
+  let result =
+    list.fold(args, Infinity, fn(acc, arg) {
+      case acc, to_number(arg) {
+        NaN, _ | _, NaN -> NaN
+        Finite(a), Finite(b) if a <=. b -> Finite(a)
+        Finite(_), Finite(b) -> Finite(b)
+        NegInfinity, _ | _, NegInfinity -> NegInfinity
+        Infinity, other | other, Infinity -> other
+      }
+    })
+  #(state, Ok(JsNumber(result)))
 }
 
 /// Math.log(x)
@@ -283,19 +265,7 @@ pub fn math_log(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
-  case x {
-    Finite(n) ->
-      case n <. 0.0 {
-        True -> NaN
-        False ->
-          case n == 0.0 {
-            True -> NegInfinity
-            False -> Finite(ffi_math_log(n))
-          }
-      }
-    NaN | NegInfinity -> NaN
-    Infinity -> Infinity
-  }
+  log_domain(x, ffi_math_log)
 }
 
 /// Math.sin(x)
@@ -331,14 +301,7 @@ pub fn math_asin(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
-  case x {
-    Finite(n) ->
-      case n <. -1.0 || n >. 1.0 {
-        True -> NaN
-        False -> Finite(ffi_math_asin(n))
-      }
-    _ -> NaN
-  }
+  domain_unit(x, ffi_math_asin)
 }
 
 /// Math.acos(x) — domain [-1, 1], returns NaN outside
@@ -347,14 +310,7 @@ pub fn math_acos(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
-  case x {
-    Finite(n) ->
-      case n <. -1.0 || n >. 1.0 {
-        True -> NaN
-        False -> Finite(ffi_math_acos(n))
-      }
-    _ -> NaN
-  }
+  domain_unit(x, ffi_math_acos)
 }
 
 /// Math.atan(x)
@@ -421,19 +377,7 @@ pub fn math_log2(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
-  case x {
-    Finite(n) ->
-      case n <. 0.0 {
-        True -> NaN
-        False ->
-          case n == 0.0 {
-            True -> NegInfinity
-            False -> Finite(ffi_math_log2(n))
-          }
-      }
-    NaN | NegInfinity -> NaN
-    Infinity -> Infinity
-  }
+  log_domain(x, ffi_math_log2)
 }
 
 /// Math.log10(x)
@@ -442,19 +386,7 @@ pub fn math_log10(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
-  case x {
-    Finite(n) ->
-      case n <. 0.0 {
-        True -> NaN
-        False ->
-          case n == 0.0 {
-            True -> NegInfinity
-            False -> Finite(ffi_math_log10(n))
-          }
-      }
-    NaN | NegInfinity -> NaN
-    Infinity -> Infinity
-  }
+  log_domain(x, ffi_math_log10)
 }
 
 /// Math.random() — returns a random float in [0, 1)
@@ -465,22 +397,16 @@ pub fn math_random(
   #(state, Ok(JsNumber(Finite(ffi_rand_uniform()))))
 }
 
-/// Math.sign(x) — returns -1, 0, or 1
+/// Math.sign(x) — returns -1, 0, or 1 (preserving ±0)
 pub fn math_sign(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
   case x {
-    Finite(n) ->
-      case n >. 0.0 {
-        True -> Finite(1.0)
-        False ->
-          case n <. 0.0 {
-            True -> Finite(-1.0)
-            False -> Finite(n)
-          }
-      }
+    Finite(n) if n >. 0.0 -> Finite(1.0)
+    Finite(n) if n <. 0.0 -> Finite(-1.0)
+    Finite(n) -> Finite(n)
     NaN -> NaN
     Infinity -> Finite(1.0)
     NegInfinity -> Finite(-1.0)
@@ -508,50 +434,28 @@ pub fn math_cbrt(
   }
 }
 
-/// Math.hypot(a, b, ...) — sqrt(sum of squares) with overflow protection
+/// Math.hypot(a, b, ...) — sqrt(sum of squares). Per spec, ±∞ beats NaN.
 pub fn math_hypot(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case args {
-    [] -> #(state, Ok(JsNumber(Finite(0.0))))
-    _ -> {
-      let nums = list.map(args, fn(arg) { to_number(arg) })
-      // If any arg is +-Infinity, result is Infinity (even if NaN present)
-      let has_infinity =
-        list.any(nums, fn(n) {
-          case n {
-            Infinity | NegInfinity -> True
-            _ -> False
-          }
-        })
-      case has_infinity {
-        True -> #(state, Ok(JsNumber(Infinity)))
-        False -> {
-          let has_nan =
-            list.any(nums, fn(n) {
-              case n {
-                NaN -> True
-                _ -> False
-              }
-            })
-          case has_nan {
-            True -> #(state, Ok(JsNumber(NaN)))
-            False -> {
-              let sum_sq =
-                list.fold(nums, 0.0, fn(acc, n) {
-                  case n {
-                    Finite(v) -> acc +. { v *. v }
-                    _ -> acc
-                  }
-                })
-              #(state, Ok(JsNumber(Finite(ffi_math_sqrt(sum_sq)))))
-            }
-          }
-        }
+  let nums = list.map(args, to_number)
+  // Classify in one pass: track presence of ±∞, NaN, and running sum of squares.
+  let #(inf, nan, sum_sq) =
+    list.fold(nums, #(False, False, 0.0), fn(acc, n) {
+      let #(i, na, s) = acc
+      case n {
+        Infinity | NegInfinity -> #(True, na, s)
+        NaN -> #(i, True, s)
+        Finite(v) -> #(i, na, s +. v *. v)
       }
-    }
+    })
+  let result = case inf, nan {
+    True, _ -> Infinity
+    _, True -> NaN
+    _, _ -> Finite(ffi_math_sqrt(sum_sq))
   }
+  #(state, Ok(JsNumber(result)))
 }
 
 /// Math.fround(x) — round to nearest 32-bit float
@@ -560,10 +464,7 @@ pub fn math_fround(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
-  case x {
-    Finite(n) -> Finite(ffi_fround(n))
-    other -> other
-  }
+  finite_passthrough(x, ffi_fround)
 }
 
 /// Math.clz32(x) — count leading zeros in 32-bit integer representation
@@ -619,18 +520,11 @@ pub fn math_log1p(
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
   case x {
-    Finite(n) ->
-      case n <. -1.0 {
-        True -> NaN
-        False ->
-          case n == -1.0 {
-            True -> NegInfinity
-            False -> Finite(ffi_math_log(1.0 +. n))
-          }
-      }
-    NaN -> NaN
+    Finite(n) if n <. -1.0 -> NaN
+    Finite(-1.0) -> NegInfinity
+    Finite(n) -> Finite(ffi_math_log(1.0 +. n))
+    NaN | NegInfinity -> NaN
     Infinity -> Infinity
-    NegInfinity -> NaN
   }
 }
 
@@ -702,26 +596,17 @@ pub fn math_acosh(
   }
 }
 
-/// Math.atanh(x) — domain (-1, 1), NaN outside, +-Infinity at +-1
+/// Math.atanh(x) — domain (-1, 1), NaN outside, ±Infinity at ±1
 pub fn math_atanh(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use x <- math_unary(args, state)
   case x {
-    Finite(n) ->
-      case n <. -1.0 || n >. 1.0 {
-        True -> NaN
-        False ->
-          case n == -1.0 {
-            True -> NegInfinity
-            False ->
-              case n == 1.0 {
-                True -> Infinity
-                False -> Finite(ffi_math_atanh(n))
-              }
-          }
-      }
+    Finite(n) if n <. -1.0 || n >. 1.0 -> NaN
+    Finite(-1.0) -> NegInfinity
+    Finite(1.0) -> Infinity
+    Finite(n) -> Finite(ffi_math_atanh(n))
     _ -> NaN
   }
 }
@@ -756,6 +641,26 @@ fn finite_or_nan(x: value.JsNum, f: fn(Float) -> Float) -> value.JsNum {
   }
 }
 
+/// For log-like ops: domain [0, ∞), NaN for <0, -∞ at 0, ∞ passes through.
+fn log_domain(x: value.JsNum, f: fn(Float) -> Float) -> value.JsNum {
+  case x {
+    Finite(n) if n <. 0.0 -> NaN
+    Finite(0.0) -> NegInfinity
+    Finite(n) -> Finite(f(n))
+    NaN | NegInfinity -> NaN
+    Infinity -> Infinity
+  }
+}
+
+/// For ops with domain [-1, 1]: NaN outside, Finite(f(n)) inside.
+fn domain_unit(x: value.JsNum, f: fn(Float) -> Float) -> value.JsNum {
+  case x {
+    Finite(n) if n <. -1.0 || n >. 1.0 -> NaN
+    Finite(n) -> Finite(f(n))
+    _ -> NaN
+  }
+}
+
 /// Simplified ToNumber for Math operations.
 pub fn to_number(val: JsValue) -> value.JsNum {
   case val {
@@ -768,12 +673,12 @@ pub fn to_number(val: JsValue) -> value.JsNum {
     JsString("Infinity") -> Infinity
     JsString("-Infinity") -> NegInfinity
     JsString(s) ->
-      case parse_float(s) {
+      case float.parse(s) {
         Ok(n) -> Finite(n)
-        Error(_) ->
-          case parse_int(s) {
+        Error(Nil) ->
+          case int.parse(s) {
             Ok(n) -> Finite(int.to_float(n))
-            Error(_) -> NaN
+            Error(Nil) -> NaN
           }
       }
     _ -> NaN
@@ -915,17 +820,3 @@ fn ffi_rand_uniform() -> Float
 
 @external(erlang, "arc_math_ffi", "fround")
 fn ffi_fround(x: Float) -> Float
-
-fn parse_float(s: String) -> Result(Float, Nil) {
-  case gleam_stdlib_parse_float(s) {
-    Ok(f) -> Ok(f)
-    Error(_) -> Error(Nil)
-  }
-}
-
-@external(erlang, "gleam_stdlib", "parse_float")
-fn gleam_stdlib_parse_float(s: String) -> Result(Float, Nil)
-
-fn parse_int(s: String) -> Result(Int, Nil) {
-  int.parse(s)
-}

@@ -7,7 +7,6 @@ import arc/vm/value.{
 }
 import gleam/float
 import gleam/int
-import gleam/option.{type Option, None, Some}
 import gleam/result
 
 // ============================================================================
@@ -24,6 +23,8 @@ pub fn to_property_key(
 ) -> Result(#(PropertyKey, State), #(JsValue, State)) {
   case key {
     JsNumber(Finite(n)) -> {
+      // +. 0.0 normalizes -0.0 → +0.0 (BEAM =:= distinguishes them)
+      let n = n +. 0.0
       let i = float.truncate(n)
       case int.to_float(i) == n && i >= 0 {
         // Valid array index — skip stringification entirely.
@@ -93,26 +94,5 @@ pub fn put_elem_value(
       ))
       state
     }
-  }
-}
-
-/// ES2024 §6.1.7 — Array Index
-pub fn to_array_index(key: JsValue) -> Option(Int) {
-  case key {
-    // Numeric key: must be a finite, non-negative, integer-valued float.
-    JsNumber(Finite(n)) -> {
-      let i = float.truncate(n)
-      case int.to_float(i) == n && i >= 0 {
-        True -> Some(i)
-        False -> None
-      }
-    }
-    // String key: parse as integer, must be non-negative.
-    JsString(s) ->
-      case int.parse(s) {
-        Ok(i) if i >= 0 -> Some(i)
-        _ -> None
-      }
-    _ -> None
   }
 }

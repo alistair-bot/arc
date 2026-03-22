@@ -786,6 +786,33 @@ pub fn has_property(heap: Heap, ref: Ref, key: PropertyKey) -> Bool {
 /// TODO(Deviation): for arrays/arguments, our elements are always configurable, so
 /// element deletion always succeeds. Needs per-element property descriptors
 /// to reject deletion of non-configurable index properties per spec.
+pub fn delete_symbol_property(
+  h: Heap,
+  ref: Ref,
+  sym: value.SymbolId,
+) -> #(Heap, Bool) {
+  case heap.read(h, ref) {
+    Some(ObjectSlot(symbol_properties:, ..) as slot) ->
+      case dict.get(symbol_properties, sym) {
+        Ok(value.DataProperty(configurable: False, ..))
+        | Ok(value.AccessorProperty(configurable: False, ..)) -> #(h, False)
+        Ok(_) -> #(
+          heap.write(
+            h,
+            ref,
+            ObjectSlot(
+              ..slot,
+              symbol_properties: dict.delete(symbol_properties, sym),
+            ),
+          ),
+          True,
+        )
+        Error(Nil) -> #(h, True)
+      }
+    _ -> #(h, True)
+  }
+}
+
 pub fn delete_property(h: Heap, ref: Ref, key: PropertyKey) -> #(Heap, Bool) {
   case heap.read(h, ref) {
     Some(ObjectSlot(kind:, elements:, ..) as slot) ->

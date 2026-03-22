@@ -156,6 +156,21 @@ pub fn spread_into_array(
             execute_inner,
             unwind_to_catch,
           )
+        Some(ObjectSlot(kind: value.ArrayIteratorObject(source:, index:), ..)) -> {
+          // Drain remaining elements from the iterator's current position.
+          let #(length, elements) =
+            heap.read_array_like(state.heap, source)
+            |> option.unwrap(#(0, elements.new()))
+          let heap =
+            append_range_to_array(
+              state.heap,
+              target_ref,
+              elements,
+              index,
+              length,
+            )
+          Ok(State(..state, heap:))
+        }
         _ -> {
           state.throw_type_error(
             state,

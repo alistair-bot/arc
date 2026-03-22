@@ -3025,40 +3025,57 @@ fn emit_single_object_prop(
   }
 }
 
-/// Destructure an array: for each element, Dup arr, PushConst(index), GetElem, recurse; then Pop arr.
+/// Destructure an array via the iterator protocol (§14.3.3.6).
+/// GetIterator on source, IteratorNext per element, bind each value.
+/// Stack on entry: [source, ...] — source is consumed.
 fn emit_array_destructure(
   e: Emitter,
   elements: List(Option(ast.Pattern)),
   binding_kind: BindingKind,
 ) -> Result(Emitter, EmitError) {
-  use e <- result.map(emit_array_elements(e, elements, 0, binding_kind))
+  // Replace source with its iterator. Throws TypeError if not iterable.
+  let e = emit_ir(e, IrGetIterator)
+  use e <- result.map(emit_array_elements(e, elements, binding_kind))
+  // Pop the iterator. Spec wants IteratorClose here on normal completion;
+  // skipping for now since we don't yet guard the close-then-rethrow path.
   emit_ir(e, IrPop)
 }
 
+/// Stack invariant: [iter, ...] on entry, [iter, ...] on exit (even after rest,
+/// where we push a dummy to keep the outer Pop happy).
 fn emit_array_elements(
   e: Emitter,
   elements: List(Option(ast.Pattern)),
-  index: Int,
   binding_kind: BindingKind,
 ) -> Result(Emitter, EmitError) {
   case elements {
     [] -> Ok(e)
-    [None, ..rest] -> emit_array_elements(e, rest, index + 1, binding_kind)
-    // Rest element: arr.slice(index) to get remaining elements
+    // Hole: step iterator, discard value.
+    [None, ..rest] -> {
+      let e = emit_ir(e, IrIteratorNext)
+      // [done, value, iter] → [iter]
+      let e = emit_ir(e, IrPop)
+      let e = emit_ir(e, IrPop)
+      emit_array_elements(e, rest, binding_kind)
+    }
+    // Rest: drain remaining iterations into a fresh array via ArraySpread.
+    // Iterators are iterable (%IteratorPrototype% has [Symbol.iterator]()
+    // returning this), so ArraySpread re-enters the same iterator.
     [Some(ast.RestElement(argument:)), ..] -> {
-      // Stack: [arr, ...] — need [index, slice_fn, arr, ...]
-      let e = emit_ir(e, IrDup)
-      let e = emit_ir(e, IrGetField2("slice"))
-      let e = push_const(e, JsNumber(Finite(int.to_float(index))))
-      let e = emit_ir(e, IrCallMethod("slice", 1))
-      emit_destructuring_bind(e, argument, binding_kind)
+      // [iter] → [rest_arr, iter] → [iter, rest_arr] → spread → [rest_arr]
+      let e = emit_ir(e, IrArrayFrom(0))
+      let e = emit_ir(e, IrSwap)
+      let e = emit_ir(e, IrArraySpread)
+      use e <- result.map(emit_destructuring_bind(e, argument, binding_kind))
+      // Spread consumed iter; push dummy for the outer Pop.
+      push_const(e, JsUndefined)
     }
     [Some(pattern), ..rest] -> {
-      let e = emit_ir(e, IrDup)
-      let e = push_const(e, JsNumber(Finite(int.to_float(index))))
-      let e = emit_ir(e, IrGetElem)
+      let e = emit_ir(e, IrIteratorNext)
+      // [done, value, iter] — discard done, bind value.
+      let e = emit_ir(e, IrPop)
       use e <- result.try(emit_destructuring_bind(e, pattern, binding_kind))
-      emit_array_elements(e, rest, index + 1, binding_kind)
+      emit_array_elements(e, rest, binding_kind)
     }
   }
 }

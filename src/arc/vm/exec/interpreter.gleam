@@ -1679,18 +1679,34 @@ fn step_objects(
       case state.stack {
         [key, obj, ..rest] ->
           case obj {
-            JsObject(ref) -> {
-              use #(pk, state) <- result.map(
-                state.rethrow(property.to_property_key(state, key)),
-              )
-              let #(heap, success) = object.delete_property(state.heap, ref, pk)
-              State(
-                ..state,
-                stack: [JsBool(success), ..rest],
-                heap:,
-                pc: state.pc + 1,
-              )
-            }
+            JsObject(ref) ->
+              case key {
+                value.JsSymbol(sym) -> {
+                  let #(heap, success) =
+                    object.delete_symbol_property(state.heap, ref, sym)
+                  Ok(
+                    State(
+                      ..state,
+                      stack: [JsBool(success), ..rest],
+                      heap:,
+                      pc: state.pc + 1,
+                    ),
+                  )
+                }
+                _ -> {
+                  use #(pk, state) <- result.map(
+                    state.rethrow(property.to_property_key(state, key)),
+                  )
+                  let #(heap, success) =
+                    object.delete_property(state.heap, ref, pk)
+                  State(
+                    ..state,
+                    stack: [JsBool(success), ..rest],
+                    heap:,
+                    pc: state.pc + 1,
+                  )
+                }
+              }
             _ ->
               Ok(
                 State(..state, stack: [JsBool(True), ..rest], pc: state.pc + 1),
@@ -2543,14 +2559,10 @@ fn step_iteration(
           case iterable {
             JsObject(ref) ->
               case heap.read(state.heap, ref) {
-                // Array/Arguments fast path: use ArrayIteratorObject when
-                // Symbol.iterator hasn't been overridden on the instance.
-                Some(ObjectSlot(kind: ArrayObject(_), ..))
-                | Some(ObjectSlot(kind: value.ArgumentsObject(_), ..)) ->
-                  get_iterator_array_fast_path(state, ref, iterable, rest)
-
-                Some(ObjectSlot(kind: GeneratorObject(_), ..)) -> {
-                  // Generators are their own iterators
+                // Iterators are their own iterator — [Symbol.iterator]() on
+                // %IteratorPrototype% returns `this`. Skip the proto walk.
+                Some(ObjectSlot(kind: GeneratorObject(_), ..))
+                | Some(ObjectSlot(kind: ArrayIteratorObject(..), ..)) ->
                   Ok(
                     State(
                       ..state,
@@ -2558,9 +2570,9 @@ fn step_iteration(
                       pc: state.pc + 1,
                     ),
                   )
-                }
-                // Any other object (or array with overridden Symbol.iterator):
-                // look up Symbol.iterator per §7.4.1 GetIterator
+                // All other objects: look up Symbol.iterator per §7.4.1.
+                // No array fast path — must honor deleted/overridden
+                // Symbol.iterator (test262 destructuring tests rely on this).
                 Some(ObjectSlot(..)) ->
                   get_iterator_via_symbol(state, ref, iterable, rest)
                 _ ->
@@ -2831,6 +2843,18 @@ fn step_special(
             value.data(callee) |> value.writable |> value.configurable,
           ),
         ])
+      // §10.4.4.6: [@@iterator] = %Array.prototype.values%
+      let sym_props = case
+        heap.read(state.heap, state.builtins.array.prototype)
+      {
+        Some(ObjectSlot(symbol_properties: arr_syms, ..)) ->
+          case dict.get(arr_syms, value.symbol_iterator) {
+            Ok(values_fn) ->
+              dict.from_list([#(value.symbol_iterator, values_fn)])
+            Error(Nil) -> dict.new()
+          }
+        _ -> dict.new()
+      }
       let #(heap, ref) =
         heap.alloc(
           state.heap,
@@ -2839,7 +2863,7 @@ fn step_special(
             properties: props,
             elements: elements.from_list(args),
             prototype: Some(state.builtins.object.prototype),
-            symbol_properties: dict.new(),
+            symbol_properties: sym_props,
             extensible: True,
           ),
         )
@@ -3147,36 +3171,6 @@ fn binop_add_with_to_primitive(
         ),
       )
     }
-  }
-}
-
-/// Array/Arguments fast path for GetIterator: allocate an ArrayIteratorObject
-/// directly if Symbol.iterator hasn't been overridden on the instance. If it
-/// has, fall through to the spec-compliant Symbol.iterator lookup.
-fn get_iterator_array_fast_path(
-  state: State,
-  ref: value.Ref,
-  iterable: JsValue,
-  rest_stack: List(JsValue),
-) -> Result(State, #(StepResult, JsValue, Heap)) {
-  let has_override = case heap.read(state.heap, ref) {
-    Some(ObjectSlot(symbol_properties: sym_props, ..)) ->
-      dict.has_key(sym_props, value.symbol_iterator)
-    _ -> False
-  }
-  case has_override {
-    False -> {
-      let #(h, iter_ref) = alloc_array_iterator(state.heap, state.builtins, ref)
-      Ok(
-        State(
-          ..state,
-          stack: [JsObject(iter_ref), ..rest_stack],
-          heap: h,
-          pc: state.pc + 1,
-        ),
-      )
-    }
-    True -> get_iterator_via_symbol(state, ref, iterable, rest_stack)
   }
 }
 

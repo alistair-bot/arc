@@ -7,6 +7,7 @@ import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers
 import arc/vm/heap.{type Heap}
 import arc/vm/internal/elements
+import arc/vm/limits
 import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type Ref, type RegExpNativeFn, AccessorProperty, DataProperty,
@@ -23,10 +24,6 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/string
-
-/// Max string size in bytes before we throw "Invalid string length".
-/// V8 uses ~2^28-2^29 chars (512MB-1GB). We use 256MB — generous for tests.
-const max_string_bytes = 268_435_456
 
 /// FFI: test if pattern matches string
 @external(erlang, "arc_regexp_ffi", "regexp_test")
@@ -814,7 +811,7 @@ fn apply_replacements(
 }
 
 /// ES2024 §22.1.3.18.1 GetSubstitution — process replacement template.
-/// Returns Error(Nil) if the result would exceed max_string_bytes.
+/// Returns Error(Nil) if the result would exceed limits.max_string_bytes.
 fn get_substitution(
   matched: String,
   str: String,
@@ -828,7 +825,7 @@ fn get_substitution(
   // reason replace-math.js was slow: 32768 * 1MB = 32GB expected output).
   let estimated =
     estimate_substitution_length(matched, str, position, captures, chars, 0)
-  case estimated > max_string_bytes {
+  case estimated > limits.max_string_bytes {
     True -> Error(Nil)
     False -> get_substitution_loop(matched, str, position, captures, chars, "")
   }

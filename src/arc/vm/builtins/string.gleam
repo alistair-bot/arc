@@ -1,6 +1,7 @@
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers
 import arc/vm/heap.{type Heap}
+import arc/vm/limits
 import arc/vm/ops/object
 import arc/vm/state.{type State, State}
 import arc/vm/value.{
@@ -1026,7 +1027,11 @@ fn string_repeat(
             "Invalid count value: " <> int.to_string(count),
           )
         // Steps 5-6: If n = 0 return "", else return n copies of S
-        False -> #(state, Ok(JsString(string.repeat(s, count))))
+        False ->
+          case limits.repeat(s, count) {
+            Ok(r) -> #(state, Ok(JsString(r)))
+            Error(Nil) -> state.range_error(state, "Invalid string length")
+          }
       }
     }
   }
@@ -1055,7 +1060,7 @@ fn string_pad_start(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  string_pad(this, args, state, string.pad_start)
+  string_pad(this, args, state, limits.pad_start)
 }
 
 /// ES2024 22.1.3.16 — String.prototype.padEnd ( maxLength [ , fillString ] )
@@ -1066,7 +1071,7 @@ fn string_pad_end(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  string_pad(this, args, state, string.pad_end)
+  string_pad(this, args, state, limits.pad_end)
 }
 
 /// Internal: implements StringPad (ES2024 22.1.3.16.1) with a
@@ -1075,23 +1080,26 @@ fn string_pad(
   this: JsValue,
   args: List(JsValue),
   state: State,
-  pad_fn: fn(String, Int, String) -> String,
+  pad_fn: fn(String, Int, String) -> Result(String, Nil),
 ) -> #(State, Result(JsValue, JsValue)) {
   // StringPad step 1: ToString(O)
   use s, state <- with_this_string(this, state)
   // StringPad step 2: ToLength(maxLength)
   let target_len = helpers.get_int_arg(args, 0, 0)
+  let finish = fn(state, filler) {
+    case pad_fn(s, target_len, filler) {
+      Ok(r) -> #(state, Ok(JsString(r)))
+      Error(Nil) -> state.range_error(state, "Invalid string length")
+    }
+  }
   case args {
     // StringPad step 5: fillString is undefined => " "
-    [_, JsUndefined, ..] | [_] | [] -> #(
-      state,
-      Ok(JsString(pad_fn(s, target_len, " "))),
-    )
+    [_, JsUndefined, ..] | [_] | [] -> finish(state, " ")
     [_, v, ..] -> {
       // StringPad step 6: ToString(fillString)
       use pad, state <- state.try_to_string(state, v)
       // StringPad steps 7-11: pad and return
-      #(state, Ok(JsString(pad_fn(s, target_len, pad))))
+      finish(state, pad)
     }
   }
 }

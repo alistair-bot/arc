@@ -122,7 +122,6 @@ pub fn new_state(
     call_fn: call_fn_callback,
     call_depth: 0,
     event_loop:,
-    snapshotting: set.new(),
   )
 }
 

@@ -26,6 +26,7 @@ array_set(Index, Value, Tuple) ->
     end.
 %% Cap tuple-backed arrays at 10M elements (~80MB on 64-bit).
 %% JS specs allow arrays up to 2^32-1 but we use a sparse dict for those.
+%% Keep in sync with limits.max_iteration in src/arc/vm/limits.gleam.
 -define(MAX_DENSE_ELEMENTS, 10000000).
 
 array_repeat(Value, Count) when Count =< ?MAX_DENSE_ELEMENTS ->

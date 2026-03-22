@@ -1,6 +1,7 @@
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/heap.{type Heap}
 import arc/vm/internal/tuple_array.{type Array}
+import arc/vm/limits
 import arc/vm/opcode.{type Op}
 import arc/vm/value.{type FuncTemplate, type JsValue, type Ref}
 import gleam/dict
@@ -132,16 +133,11 @@ pub type State {
     call_fn: fn(State, JsValue, JsValue, List(JsValue)) ->
       Result(#(JsValue, State), #(JsValue, State)),
     /// Current call stack depth. Incremented on function entry, decremented on return.
-    /// Throws RangeError when exceeding max_call_depth.
+    /// Throws RangeError when exceeding limits.max_call_depth.
     call_depth: Int,
     /// Whether the event loop is active. When False, APIs that require the
     /// event loop (Arc.receiveAsync, Arc.setTimeout) throw a TypeError.
     event_loop: Bool,
-    /// Refs currently being snapshotted by require_array. If a getter invoked
-    /// during apply_property_overrides calls another array method on the same
-    /// ref, the inner require_array sees the ref here and skips accessor
-    /// resolution, breaking the getter → push → require_array → getter cycle.
-    snapshotting: set.Set(Ref),
   )
 }
 
@@ -256,6 +252,19 @@ pub fn range_error(
 ) -> #(State, Result(JsValue, JsValue)) {
   let #(heap, err) = common.make_range_error(state.heap, state.builtins, msg)
   #(State(..state, heap:), Error(err))
+}
+
+/// Guard against array length exceeding Number.MAX_SAFE_INTEGER.
+/// Throws TypeError (per spec §23.1.3.23/31/33) if length > 2^53-1.
+pub fn guard_safe_length(
+  state: State,
+  length: Int,
+  cont: fn() -> #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  case length > limits.max_safe_integer {
+    True -> type_error(state, "Array length exceeds maximum safe integer")
+    False -> cont()
+  }
 }
 
 // ============================================================================

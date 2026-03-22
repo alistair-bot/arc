@@ -23,6 +23,7 @@ import arc/vm/exec/promises
 import arc/vm/heap.{type Heap}
 import arc/vm/internal/elements
 import arc/vm/internal/tuple_array
+import arc/vm/limits
 import arc/vm/ops/coerce
 import arc/vm/ops/object
 import arc/vm/ops/operators
@@ -154,8 +155,6 @@ pub fn call_function(
 }
 
 /// Regular (non-generator) function call: save frame, enter callee.
-const max_call_depth: Int = 10_000
-
 fn call_regular_function(
   state: State,
   fn_ref: value.Ref,
@@ -167,7 +166,7 @@ fn call_regular_function(
   constructor_this: option.Option(JsValue),
   new_callee_ref: option.Option(Ref),
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
-  use <- bool.lazy_guard(state.call_depth >= max_call_depth, fn() {
+  use <- bool.lazy_guard(state.call_depth >= limits.max_call_depth, fn() {
     state.throw_range_error(state, "Maximum call stack size exceeded")
   })
   // Save caller frame

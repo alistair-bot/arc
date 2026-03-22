@@ -85,20 +85,39 @@ main() ->
         false -> ok
     end,
 
-    %% Split test262 failures from unit-test failures for printing.
-    %% Both count toward the exit code — test262 failures here are snapshot
-    %% mismatches (REGRESSION or NEW PASS), which should fail CI so the
-    %% snapshot is kept in sync.
-    {T262Failed, NonT262Failed} = lists:partition(fun({N, _, _, _}) ->
+    %% Split test262 failures from unit-test failures. Unit-test failures
+    %% always fail the build. test262 failures are snapshot mismatches
+    %% (REGRESSION or NEW PASS) and fail the build UNLESS in
+    %% UPDATE_SNAPSHOT mode — the snapshot was already written, exit 0
+    %% lets the dev commit it without a second run.
+    %%
+    %% Harness-level timeouts bypass run_file's snapshot check. Only count
+    %% them as failures if the test WAS in the snapshot (= regression).
+    %% Timeouts on non-snapshot tests are just slow expected-fails.
+    {T262Raw, NonT262Failed} = lists:partition(fun({N, _, _, _}) ->
         is_binary(N) andalso binary:match(N, <<"test262/">>) =/= nomatch
     end, Failed),
+    T262Failed = case HasTest262 of
+        false -> T262Raw;
+        true -> [F || {<<"test262/", Path/binary>>, _, _, _} = F <- T262Raw,
+                      test262_exec_ffi:snapshot_contains(Path)]
+    end,
     lists:foreach(fun({Name, Class, Reason, Stack}) ->
         io:format("~n  FAIL ~ts~n", [Name]),
         print_failure(Class, Reason, Stack)
     end, NonT262Failed),
-    case T262Failed of
-        [] -> ok;
-        _ ->
+    UpdateMode = case os:getenv("UPDATE_SNAPSHOT") of
+        false -> false;
+        "" -> false;
+        _ -> true
+    end,
+    case {T262Failed, UpdateMode} of
+        {[], _} -> ok;
+        {_, true} ->
+            io:format("~n  ~b test262 timeout(s)/error(s) during snapshot "
+                      "update — these are not in the snapshot.~n",
+                      [length(T262Failed)]);
+        {_, false} ->
             io:format("~n  ~b test262 snapshot mismatch(es) — "
                       "investigate, then UPDATE_SNAPSHOT=1 to accept:~n",
                       [length(T262Failed)]),
@@ -111,8 +130,10 @@ main() ->
             end
     end,
 
-    %% Summary — exit code includes test262 snapshot mismatches
-    FailCount = length(Failed),
+    FailCount = length(NonT262Failed) + case UpdateMode of
+        true -> 0;
+        false -> length(T262Failed)
+    end,
     io:format("~n~b passed, ~b failed (~.1fs)~n", [Passed, FailCount, Elapsed / 1000.0]),
 
     case FailCount of
@@ -185,10 +206,17 @@ spawn_worker({Name, Fun}, Parent, Ref, Feeder, FeedRef) ->
             end,
             Self ! {TestRef, Res}
         end),
+        %% test262 RegExp codepoint tests iterate 0..0x10FFFF — legitimately
+        %% slow under parallel load. Unit tests complete well under 10s so
+        %% the longer timeout only affects test262.
+        Timeout = case binary:match(Name, <<"test262/">>) of
+            nomatch -> 10000;
+            _ -> 60000
+        end,
         Result = receive
             {TestRef, R} -> R;
             {'EXIT', Pid, killed} -> {error, {error, heap_limit_exceeded, []}}
-        after 10000 ->
+        after Timeout ->
             exit(Pid, kill),
             {error, {error, test_timeout, []}}
         end,

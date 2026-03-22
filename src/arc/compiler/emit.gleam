@@ -1750,6 +1750,52 @@ fn emit_expr(e: Emitter, expr: ast.Expression) -> Result(Emitter, EmitError) {
         }
       }
     }
+    // obj.prop++ / obj[key]++ — emit as prefix (clean stack protocol via
+    // GetField2/PutField), then undo ±1 for postfix to recover old value.
+    // Spec's ToNumeric coercion already happened in the Add/Sub, so new-1 = old.
+    ast.UpdateExpression(
+      op,
+      prefix,
+      ast.MemberExpression(obj, ast.Identifier(prop), False),
+    ) -> {
+      let one = JsNumber(Finite(1.0))
+      let #(bin_kind, undo) = case op {
+        ast.Increment -> #(opcode.Add, opcode.Sub)
+        ast.Decrement -> #(opcode.Sub, opcode.Add)
+      }
+      use e <- result.map(emit_expr(e, obj))
+      let e = emit_ir(e, IrGetField2(prop))
+      let e = push_const(e, one)
+      let e = emit_ir(e, IrBinOp(bin_kind))
+      let e = emit_ir(e, IrPutField(prop))
+      case prefix {
+        True -> e
+        False -> {
+          let e = push_const(e, one)
+          emit_ir(e, IrBinOp(undo))
+        }
+      }
+    }
+    ast.UpdateExpression(op, prefix, ast.MemberExpression(obj, key, True)) -> {
+      let one = JsNumber(Finite(1.0))
+      let #(bin_kind, undo) = case op {
+        ast.Increment -> #(opcode.Add, opcode.Sub)
+        ast.Decrement -> #(opcode.Sub, opcode.Add)
+      }
+      use e <- result.try(emit_expr(e, obj))
+      use e <- result.map(emit_expr(e, key))
+      let e = emit_ir(e, IrGetElem2)
+      let e = push_const(e, one)
+      let e = emit_ir(e, IrBinOp(bin_kind))
+      let e = emit_ir(e, IrPutElem)
+      case prefix {
+        True -> e
+        False -> {
+          let e = push_const(e, one)
+          emit_ir(e, IrBinOp(undo))
+        }
+      }
+    }
 
     // Parenthesized LHS assignment — unwrap parens but skip name inference.
     // Per ES spec §13.15.2: IsIdentifierRef returns false for

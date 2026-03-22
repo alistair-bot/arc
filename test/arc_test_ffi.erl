@@ -91,16 +91,21 @@ main() ->
     %% UPDATE_SNAPSHOT mode — the snapshot was already written, exit 0
     %% lets the dev commit it without a second run.
     %%
-    %% Harness-level timeouts bypass run_file's snapshot check. Only count
-    %% them as failures if the test WAS in the snapshot (= regression).
-    %% Timeouts on non-snapshot tests are just slow expected-fails.
+    %% Harness-level timeouts/heap-kills bypass run_file's snapshot check.
+    %% Only count those if the test WAS in the snapshot (= regression).
+    %% run_file errors (REGRESSION / NEW PASS) always count — the snapshot
+    %% check already happened there.
     {T262Raw, NonT262Failed} = lists:partition(fun({N, _, _, _}) ->
         is_binary(N) andalso binary:match(N, <<"test262/">>) =/= nomatch
     end, Failed),
     T262Failed = case HasTest262 of
         false -> T262Raw;
-        true -> [F || {<<"test262/", Path/binary>>, _, _, _} = F <- T262Raw,
-                      test262_exec_ffi:snapshot_contains(Path)]
+        true -> [F || {<<"test262/", Path/binary>>, _, R, _} = F <- T262Raw,
+                      case R of
+                          test_timeout -> test262_exec_ffi:snapshot_contains(Path);
+                          heap_limit_exceeded -> test262_exec_ffi:snapshot_contains(Path);
+                          _ -> true
+                      end]
     end,
     lists:foreach(fun({Name, Class, Reason, Stack}) ->
         io:format("~n  FAIL ~ts~n", [Name]),
@@ -206,12 +211,11 @@ spawn_worker({Name, Fun}, Parent, Ref, Feeder, FeedRef) ->
             end,
             Self ! {TestRef, Res}
         end),
-        %% test262 RegExp codepoint tests iterate 0..0x10FFFF — legitimately
-        %% slow under parallel load. Unit tests complete well under 10s so
-        %% the longer timeout only affects test262.
+        %% A handful of test262 tests iterate 0..0x10FFFF codepoints and take
+        %% ~20-25s under parallel load. Unit tests complete well under 5s.
         Timeout = case binary:match(Name, <<"test262/">>) of
             nomatch -> 10000;
-            _ -> 60000
+            _ -> 30000
         end,
         Result = receive
             {TestRef, R} -> R;

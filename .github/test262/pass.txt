@@ -6345,11 +6345,17 @@ built-ins/Reflect/setPrototypeOf/target-is-not-object-throws.js
 built-ins/Reflect/setPrototypeOf/target-is-symbol-throws.js
 built-ins/RegExp/15.10.4.1-1.js
 built-ins/RegExp/15.10.4.1-4.js
+built-ins/RegExp/CharacterClassEscapes/character-class-digit-class-escape-negative-cases.js
 built-ins/RegExp/CharacterClassEscapes/character-class-digit-class-escape-positive-cases.js
 built-ins/RegExp/CharacterClassEscapes/character-class-non-digit-class-escape-negative-cases.js
+built-ins/RegExp/CharacterClassEscapes/character-class-non-digit-class-escape-positive-cases.js
 built-ins/RegExp/CharacterClassEscapes/character-class-non-whitespace-class-escape-negative-cases.js
+built-ins/RegExp/CharacterClassEscapes/character-class-non-whitespace-class-escape-positive-cases.js
 built-ins/RegExp/CharacterClassEscapes/character-class-non-word-class-escape-negative-cases.js
+built-ins/RegExp/CharacterClassEscapes/character-class-non-word-class-escape-positive-cases.js
+built-ins/RegExp/CharacterClassEscapes/character-class-whitespace-class-escape-negative-cases.js
 built-ins/RegExp/CharacterClassEscapes/character-class-whitespace-class-escape-positive-cases.js
+built-ins/RegExp/CharacterClassEscapes/character-class-word-class-escape-negative-cases.js
 built-ins/RegExp/CharacterClassEscapes/character-class-word-class-escape-positive-cases.js
 built-ins/RegExp/S15.10.2.10_A4.1_T3.js
 built-ins/RegExp/S15.10.2.11_A1_T4.js

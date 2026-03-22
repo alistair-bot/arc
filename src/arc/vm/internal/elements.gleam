@@ -13,6 +13,13 @@ import gleam/result
 
 const max_gap = 1024
 
+/// Dense arrays promote to sparse above this size on write. Tuple set/grow
+/// are O(n) copy on BEAM — sequential append becomes O(n²). Dict insert is
+/// O(log n). Reads pay O(log n) vs O(1), but write-heavy loops (e.g.
+/// test262's buildString filling 10k-element chunks) go from quadratic to
+/// n·log(n).
+const dense_write_limit = 32
+
 /// Empty elements (for non-array objects and empty arrays).
 pub fn new() -> JsElements {
   DenseElements(tuple_array.from_list([]))
@@ -68,21 +75,21 @@ pub fn set(elements: JsElements, index: Int, val: JsValue) -> JsElements {
   case elements {
     DenseElements(data) -> {
       let size = tuple_array.size(data)
-      case index < size {
-        True ->
-          // In-bounds write
+      case index < size, size >= dense_write_limit {
+        True, False ->
           case tuple_array.set(index, val, data) {
             Ok(new_data) -> DenseElements(new_data)
             Error(_) -> elements
           }
-        False ->
-          // Out-of-bounds — check gap
+        _, True ->
+          // Large dense array: tuple set/grow are O(n) copy. Promote to
+          // sparse so subsequent writes are O(log n).
+          SparseElements(dense_to_sparse(data) |> dict.insert(index, val))
+        False, False ->
           case index - size > max_gap {
             True ->
-              // Large gap -> convert to sparse
               SparseElements(dense_to_sparse(data) |> dict.insert(index, val))
             False -> {
-              // Small gap -> grow tuple, fill with JsUndefined
               let grown = tuple_array.grow(data, index + 1, JsUndefined)
               DenseElements(
                 tuple_array.set(index, val, grown) |> result.unwrap(grown),

@@ -18,6 +18,19 @@ pub type Op {
   PutEnvVar(index: Int)
   GetGlobal(name: String)
   PutGlobal(name: String)
+  /// Check state.eval_env dict for `name`; if present push its value, else
+  /// fall through to GetGlobal semantics. Emitted in sloppy functions that
+  /// contain a direct eval call — lets eval-created vars be read by name.
+  GetEvalVar(name: String)
+  /// Write to state.eval_env dict if `name` already exists there, else fall
+  /// through to PutGlobal semantics. Emitted in sloppy direct-eval contexts.
+  PutEvalVar(name: String)
+  /// Seed `name` = undefined into state.eval_env dict (create key if absent).
+  /// Emitted for `var` declarations at the top level of sloppy direct-eval
+  /// code, in place of DeclareGlobalVar.
+  DeclareEvalVar(name: String)
+  /// `typeof name` — check eval_env first, fall through to TypeofGlobal.
+  TypeofEvalVar(name: String)
   GetThis
 
   // -- Property Access --
@@ -58,6 +71,11 @@ pub type Op {
 
   // -- Calls --
   Call(arity: Int)
+  /// Like Call but emitted for a syntactic `eval(...)` (identifier callee
+  /// named "eval"). At runtime, if the callee resolves to the intrinsic eval
+  /// function, performs a DIRECT eval (sees caller's local scope via boxed
+  /// locals + FuncTemplate.local_names). Otherwise behaves identically to Call.
+  CallEval(arity: Int)
   CallMethod(name: String, arity: Int)
   CallConstructor(arity: Int)
   /// [args_array, callee] → [result]; this=undefined. Spread-call path.
@@ -215,6 +233,10 @@ pub type IrOp {
   IrGetGlobal(name: String)
   IrPutGlobal(name: String)
   IrTypeofGlobal(name: String)
+  IrGetEvalVar(name: String)
+  IrPutEvalVar(name: String)
+  IrDeclareEvalVar(name: String)
+  IrTypeofEvalVar(name: String)
 
   // -- Everything else is the same as final Op --
   IrPushConst(index: Int)
@@ -243,6 +265,7 @@ pub type IrOp {
   IrArrayPushHole
   IrArraySpread
   IrCall(arity: Int)
+  IrCallEval(arity: Int)
   IrCallMethod(name: String, arity: Int)
   IrCallConstructor(arity: Int)
   IrCallApply

@@ -102,6 +102,10 @@ pub type FuncTemplate {
     is_derived_constructor: Bool,
     is_generator: Bool,
     is_async: Bool,
+    /// Present only for functions that contain a direct eval call.
+    /// Maps variable name → local slot index. All such locals are boxed
+    /// (BoxSlot refs), so direct eval can read/write them by index.
+    local_names: Option(List(#(String, Int))),
   )
 }
 
@@ -1068,6 +1072,12 @@ pub type HeapSlot {
   /// by a closure AND mutated, both the local frame and EnvSlot hold a Ref to
   /// the same BoxSlot. Reads/writes go through this indirection.
   BoxSlot(value: JsValue)
+  /// Sloppy-mode direct-eval var-injection dict. Per spec §19.2.1.1, `var`
+  /// declarations inside a sloppy direct eval land in the caller's variable
+  /// environment. Since caller locals are indexed at compile time, new names
+  /// introduced at runtime go here. GetEvalVar/PutEvalVar check this before
+  /// falling through to globals. Frame-local — saved/restored on call/return.
+  EvalEnvSlot(vars: Dict(String, JsValue))
   /// Iterator state for for-in loops. Eagerly snapshots enumerable keys
   /// upfront (per spec: prototype shadowing requires full collection).
   /// Stores pre-collected string keys as JsString values.
@@ -1371,6 +1381,7 @@ pub fn refs_in_slot(slot: HeapSlot) -> List(Ref) {
     }
     EnvSlot(slots:) -> list.flat_map(slots, refs_in_value)
     BoxSlot(value:) -> refs_in_value(value)
+    EvalEnvSlot(vars:) -> dict.values(vars) |> list.flat_map(refs_in_value)
     ForInIteratorSlot(keys:) -> list.flat_map(keys, refs_in_value)
     PromiseSlot(state:, fulfill_reactions:, reject_reactions:, ..) -> {
       let state_refs = case state {

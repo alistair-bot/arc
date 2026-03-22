@@ -65,6 +65,9 @@ pub type SavedFrame {
     callee_ref: Option(Ref),
     /// Original args passed to this frame's call (for arguments object creation).
     call_args: List(JsValue),
+    /// Caller's eval_env ref (sloppy direct-eval var-injection dict).
+    /// Restored on Return so eval-created vars survive the callee's lifetime.
+    eval_env: Option(Ref),
   )
 }
 
@@ -142,6 +145,12 @@ pub type State {
     /// Whether the event loop is active. When False, APIs that require the
     /// event loop (Arc.receiveAsync, Arc.setTimeout) throw a TypeError.
     event_loop: Bool,
+    /// Sloppy direct-eval var-injection dict (EvalEnvSlot ref). Allocated the
+    /// first time a sloppy direct eval runs in this frame. `var` declarations
+    /// in the eval'd code write here; subsequent reads/writes in the caller
+    /// check here before global. Frame-local — saved to SavedFrame on call,
+    /// restored on return. None for frames with no direct eval.
+    eval_env: Option(Ref),
   )
 }
 

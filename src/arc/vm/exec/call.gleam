@@ -193,6 +193,7 @@ fn call_regular_function(
       constructor_this:,
       callee_ref: state.callee_ref,
       call_args: state.call_args,
+      eval_env: state.eval_env,
     )
   let locals = setup_locals(state.heap, env_ref, callee_template, args)
   // Arrow functions inherit this from their enclosing scope
@@ -221,6 +222,7 @@ fn call_regular_function(
       this_binding: new_this,
       callee_ref: effective_callee_ref,
       call_args: args,
+      eval_env: None,
     ),
   )
 }

@@ -13,21 +13,23 @@ import arc/vm/internal/tuple_array
 import arc/vm/opcode.{
   type Op, Add, ArrayFrom, ArrayFromWithHoles, ArrayPush, ArrayPushHole,
   ArraySpread, Await, BinOp, BoxLocal, Call, CallApply, CallConstructor,
-  CallConstructorApply, CallMethod, CallMethodApply, CallSuper, CreateArguments,
-  DeclareGlobalLex, DeclareGlobalVar, DefineAccessor, DefineAccessorComputed,
-  DefineField, DefineFieldComputed, DefineMethod, DeleteElem, DeleteField, Dup,
-  ForInNext, ForInStart, GetAsyncIterator, GetBoxed, GetElem, GetElem2, GetField,
-  GetField2, GetGlobal, GetIterator, GetLocal, GetThis, InitGlobalLex,
-  InitialYield, IteratorClose, IteratorNext, Jump, JumpIfFalse, JumpIfNullish,
-  JumpIfTrue, MakeClosure, NewObject, NewRegExp, ObjectSpread, Pop, PushConst,
-  PushTry, PutBoxed, PutElem, PutField, PutGlobal, PutLocal, Return,
-  SetupDerivedClass, Swap, TypeOf, TypeofGlobal, UnaryOp, Yield,
+  CallConstructorApply, CallEval, CallMethod, CallMethodApply, CallSuper,
+  CreateArguments, DeclareEvalVar, DeclareGlobalLex, DeclareGlobalVar,
+  DefineAccessor, DefineAccessorComputed, DefineField, DefineFieldComputed,
+  DefineMethod, DeleteElem, DeleteField, Dup, ForInNext, ForInStart,
+  GetAsyncIterator, GetBoxed, GetElem, GetElem2, GetEvalVar, GetField, GetField2,
+  GetGlobal, GetIterator, GetLocal, GetThis, InitGlobalLex, InitialYield,
+  IteratorClose, IteratorNext, Jump, JumpIfFalse, JumpIfNullish, JumpIfTrue,
+  MakeClosure, NewObject, NewRegExp, ObjectSpread, Pop, PushConst, PushTry,
+  PutBoxed, PutElem, PutEvalVar, PutField, PutGlobal, PutLocal, Return,
+  SetupDerivedClass, Swap, TypeOf, TypeofEvalVar, TypeofGlobal, UnaryOp, Yield,
 }
 import arc/vm/ops/array as array_ops
 import arc/vm/ops/coerce
 import arc/vm/ops/object
 import arc/vm/ops/operators
 import arc/vm/ops/property
+import arc/vm/realm
 import arc/vm/state.{
   type State, type StepResult, type VmError, Awaited, Done,
   LocalIndexOutOfBounds, SavedFrame, StackUnderflow, State, StepVmError, Thrown,
@@ -35,9 +37,9 @@ import arc/vm/state.{
 }
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, ArrayIteratorObject, ArrayObject,
-  DataProperty, Finite, ForInIteratorSlot, FunctionObject, GeneratorObject,
-  JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined, JsUninitialized,
-  Named, NativeFunction, ObjectSlot, OrdinaryObject,
+  DataProperty, EvalEnvSlot, Finite, ForInIteratorSlot, FunctionObject,
+  GeneratorObject, JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined,
+  JsUninitialized, Named, NativeFunction, ObjectSlot, OrdinaryObject,
 }
 import gleam/dict
 import gleam/int
@@ -112,6 +114,7 @@ fn construct_fn_callback(
           is_derived_constructor: False,
           is_generator: False,
           is_async: False,
+          local_names: None,
         )
       let isolated =
         State(
@@ -215,6 +218,7 @@ pub fn new_state(
     construct_fn: construct_fn_callback,
     call_depth: 0,
     event_loop:,
+    eval_env: None,
   )
 }
 
@@ -348,6 +352,7 @@ fn unwind_to_catch(state: State, thrown_value: JsValue) -> Option(State) {
             this_binding:,
             callee_ref:,
             call_args:,
+            eval_env:,
             ..,
           ),
           ..rest_frames
@@ -365,6 +370,7 @@ fn unwind_to_catch(state: State, thrown_value: JsValue) -> Option(State) {
               this_binding:,
               callee_ref:,
               call_args:,
+              eval_env:,
               call_stack: rest_frames,
               call_depth: state.call_depth - 1,
             ),
@@ -422,6 +428,10 @@ fn step(state: State, op: Op) -> Result(State, #(StepResult, JsValue, Heap)) {
     // Global variable access
     GetGlobal(_)
     | PutGlobal(_)
+    | GetEvalVar(_)
+    | PutEvalVar(_)
+    | DeclareEvalVar(_)
+    | TypeofEvalVar(_)
     | DeclareGlobalVar(_)
     | DeclareGlobalLex(_, _)
     | InitGlobalLex(_)
@@ -472,6 +482,7 @@ fn step(state: State, op: Op) -> Result(State, #(StepResult, JsValue, Heap)) {
 
     // Function calls
     Call(_)
+    | CallEval(_)
     | CallMethod(_, _)
     | CallConstructor(_)
     | CallSuper(_)
@@ -699,6 +710,11 @@ fn step_locals(
   }
 }
 
+fn lookup_eval_env(state: State, name: String) -> Option(JsValue) {
+  option.then(state.eval_env, heap.read_eval_env(state.heap, _))
+  |> option.then(fn(vars) { dict.get(vars, name) |> option.from_result })
+}
+
 fn step_globals(
   state: State,
   op: Op,
@@ -888,6 +904,77 @@ fn step_globals(
               key,
               JsUndefined,
             )
+          Ok(State(..state, heap:, pc: state.pc + 1))
+        }
+      }
+    }
+
+    // Sloppy direct-eval var access: check eval_env dict, fall through to globals.
+    GetEvalVar(name) -> {
+      case lookup_eval_env(state, name) {
+        Some(v) ->
+          Ok(State(..state, stack: [v, ..state.stack], pc: state.pc + 1))
+        None -> step_globals(state, GetGlobal(name))
+      }
+    }
+
+    // typeof on a name that might live in eval_env.
+    TypeofEvalVar(name) -> {
+      case lookup_eval_env(state, name) {
+        Some(v) ->
+          Ok(
+            State(
+              ..state,
+              stack: [
+                JsString(common.typeof_value(v, state.heap)),
+                ..state.stack
+              ],
+              pc: state.pc + 1,
+            ),
+          )
+        None -> step_globals(state, TypeofGlobal(name))
+      }
+    }
+
+    // Sloppy direct-eval var write: update eval_env if key exists, else PutGlobal.
+    PutEvalVar(name) -> {
+      case state.eval_env, state.stack {
+        Some(ref), [v, ..rest] -> {
+          let vars =
+            heap.read_eval_env(state.heap, ref) |> option.unwrap(dict.new())
+          case dict.has_key(vars, name) {
+            False -> step_globals(state, PutGlobal(name))
+            True -> {
+              let heap =
+                heap.write(
+                  state.heap,
+                  ref,
+                  EvalEnvSlot(dict.insert(vars, name, v)),
+                )
+              Ok(State(..state, heap:, stack: rest, pc: state.pc + 1))
+            }
+          }
+        }
+        _, _ -> step_globals(state, PutGlobal(name))
+      }
+    }
+
+    // Sloppy direct-eval var declaration: seed name=undefined into eval_env.
+    DeclareEvalVar(name) -> {
+      case state.eval_env {
+        None -> step_globals(state, DeclareGlobalVar(name))
+        Some(ref) -> {
+          let vars =
+            heap.read_eval_env(state.heap, ref) |> option.unwrap(dict.new())
+          let heap = case dict.has_key(vars, name) {
+            True -> state.heap
+            False ->
+              heap.write(
+                state.heap,
+                ref,
+                EvalEnvSlot(dict.insert(vars, name, JsUndefined)),
+              )
+          }
           Ok(State(..state, heap:, pc: state.pc + 1))
         }
       }
@@ -1189,6 +1276,7 @@ fn step_control_flow(
             constructor_this:,
             callee_ref: saved_callee_ref,
             call_args: saved_call_args,
+            eval_env: saved_eval_env,
           ),
           ..rest_frames
         ] -> {
@@ -1216,6 +1304,7 @@ fn step_control_flow(
                   this_binding: saved_this,
                   callee_ref: saved_callee_ref,
                   call_args: saved_call_args,
+                  eval_env: saved_eval_env,
                 ),
               )
             }
@@ -1239,6 +1328,7 @@ fn step_control_flow(
                           this_binding: saved_this,
                           callee_ref: saved_callee_ref,
                           call_args: saved_call_args,
+                          eval_env: saved_eval_env,
                         ),
                       )
                     JsUndefined ->
@@ -1265,6 +1355,7 @@ fn step_control_flow(
                               this_binding: saved_this,
                               callee_ref: saved_callee_ref,
                               call_args: saved_call_args,
+                              eval_env: saved_eval_env,
                             ),
                           )
                       }
@@ -1292,6 +1383,7 @@ fn step_control_flow(
                       try_stack:,
                       this_binding: saved_this,
                       callee_ref: saved_callee_ref,
+                      eval_env: saved_eval_env,
                     ),
                   )
               }
@@ -2040,6 +2132,46 @@ fn step_calls(
   op: Op,
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   case op {
+    CallEval(arity) -> {
+      // Syntactic `eval(...)` call. Runtime identity check: if the callee
+      // resolves to the intrinsic eval function, do a DIRECT eval (sees
+      // caller's locals via state.func.local_names + boxed slots). If eval
+      // was shadowed/rebound, fall through to regular Call semantics.
+      case pop_n(state.stack, arity) {
+        Some(#(args, [JsObject(callee_ref), ..rest_stack]))
+          if callee_ref == state.builtins.eval
+        -> {
+          let #(new_state, result) =
+            realm.direct_eval_native(
+              args,
+              State(..state, stack: rest_stack),
+              execute_inner,
+              new_state,
+            )
+          case result {
+            Ok(val) ->
+              Ok(
+                State(
+                  ..new_state,
+                  stack: [val, ..new_state.stack],
+                  pc: state.pc + 1,
+                ),
+              )
+            // Unwind directly with new_state so eval_env (possibly just
+            // lazy-allocated in run_direct_eval) threads through. The step
+            // error return #(Thrown, val, Heap) can't carry it.
+            Error(thrown) ->
+              case unwind_to_catch(new_state, thrown) {
+                Some(caught) -> Ok(caught)
+                None -> Error(#(Thrown, thrown, new_state.heap))
+              }
+          }
+        }
+        // Not the intrinsic eval — regular call semantics.
+        _ -> step_calls(state, Call(arity))
+      }
+    }
+
     Call(arity) -> {
       // Stack layout: [arg_n, ..., arg_1, callee, ...rest]
       // Pop arity args, then callee

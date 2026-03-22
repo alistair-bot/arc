@@ -6697,3 +6697,142 @@ pub fn function_constructor_basic_test() -> Nil {
 pub fn function_constructor_no_args_test() -> Nil {
   assert_normal("new Function('return 42')()", JsNumber(Finite(42.0)))
 }
+
+// ============================================================================
+// Direct eval — sees caller's local scope
+// ============================================================================
+
+pub fn direct_eval_read_local_test() -> Nil {
+  assert_normal(
+    "function f() { let x = 5; return eval('x'); } f()",
+    JsNumber(Finite(5.0)),
+  )
+}
+
+pub fn direct_eval_write_local_test() -> Nil {
+  assert_normal(
+    "function f() { let x = 5; eval('x = 10'); return x; } f()",
+    JsNumber(Finite(10.0)),
+  )
+}
+
+pub fn direct_eval_shadowed_test() -> Nil {
+  // eval was rebound — should be regular call, not direct eval
+  assert_normal(
+    "function f() { let x=5; let eval=(s)=>99; return eval('x'); } f()",
+    JsNumber(Finite(99.0)),
+  )
+}
+
+pub fn direct_eval_this_test() -> Nil {
+  assert_normal(
+    "const o = {x:1, f(){ return eval('this.x'); }}; o.f()",
+    JsNumber(Finite(1.0)),
+  )
+}
+
+pub fn direct_eval_nested_closure_read_test() -> Nil {
+  // Inner fn doesn't reference `a` syntactically — it's opaque inside the
+  // eval string. Capture must be driven by eval_in_subtree, not free-var
+  // analysis, so the box ref threads through the closure chain.
+  assert_normal(
+    "function outer(){let a=10;return(function(){return eval('a');})();} outer()",
+    JsNumber(Finite(10.0)),
+  )
+}
+
+pub fn direct_eval_nested_closure_write_test() -> Nil {
+  assert_normal(
+    "function outer(){let a=5;(function(){eval('a=20');})();return a;} outer()",
+    JsNumber(Finite(20.0)),
+  )
+}
+
+pub fn direct_eval_three_levels_deep_test() -> Nil {
+  assert_normal(
+    "function a(){let x=1;function b(){function c(){return eval('x');}return c();}return b();} a()",
+    JsNumber(Finite(1.0)),
+  )
+}
+
+pub fn direct_eval_multiple_outer_vars_test() -> Nil {
+  assert_normal(
+    "function f(){let a=1,b=2,c=3;return(function(){return eval('a+b+c');})();} f()",
+    JsNumber(Finite(6.0)),
+  )
+}
+
+// ============================================================================
+// Direct eval — sloppy-mode var injection (eval_env)
+// ============================================================================
+
+pub fn direct_eval_var_injection_test() -> Nil {
+  // Sloppy mode: `var y` in eval lands in caller's eval_env, not global.
+  // Caller's `return y` was compiled before eval ran — emits GetEvalVar
+  // which checks eval_env first.
+  assert_normal(
+    "function f(){eval('var y=1');return y;} f()",
+    JsNumber(Finite(1.0)),
+  )
+}
+
+pub fn direct_eval_var_injection_strict_caller_test() -> Nil {
+  // Strict caller: eval gets its own var environment (spec §19.2.1.1).
+  // `y` doesn't leak — caller's `return y` throws ReferenceError.
+  assert_thrown("function f(){'use strict';eval('var y=1');return y;} f()")
+}
+
+pub fn direct_eval_var_injection_strict_eval_test() -> Nil {
+  // Strict eval body (even with sloppy caller) also blocks var-injection.
+  assert_thrown("function f(){eval('\"use strict\";var y=1');return y;} f()")
+}
+
+pub fn direct_eval_var_persistence_test() -> Nil {
+  // Multiple evals in one frame share the same eval_env ref.
+  assert_normal(
+    "function f(){eval('var y=1');eval('y++');return y;} f()",
+    JsNumber(Finite(2.0)),
+  )
+}
+
+pub fn direct_eval_var_not_leaked_to_callee_test() -> Nil {
+  // eval_env is frame-local. g() gets a fresh frame with eval_env=None,
+  // so its `y` lookup falls through to GetGlobal → ReferenceError.
+  assert_thrown(
+    "function g(){return y;} function f(){eval('var y=1');return g();} f()",
+  )
+}
+
+pub fn direct_eval_var_not_leaked_to_global_test() -> Nil {
+  // Var lands in eval_env, NOT on globalThis. After f() returns, y is gone.
+  assert_normal(
+    "function f(){eval('var y=1');} f(); typeof y",
+    JsString("undefined"),
+  )
+}
+
+pub fn direct_eval_var_write_then_read_test() -> Nil {
+  // Caller can read AND write eval-created vars via GetEvalVar/PutEvalVar.
+  assert_normal(
+    "function f(){eval('var y=1');y=y+5;return y;} f()",
+    JsNumber(Finite(6.0)),
+  )
+}
+
+pub fn direct_eval_var_typeof_test() -> Nil {
+  // typeof must check eval_env, not just globals.
+  assert_normal(
+    "function f(){eval('var y=1');return typeof y;} f()",
+    JsString("number"),
+  )
+}
+
+pub fn direct_eval_var_survives_throw_test() -> Nil {
+  // eval_env allocated during a throwing eval must survive the catch.
+  // Previously the step error-return dropped eval_env when the FIRST eval
+  // in a frame lazy-allocated it then threw.
+  assert_normal(
+    "function f(){try{eval('var y=1;throw 0');}catch(e){}return y;} f()",
+    JsNumber(Finite(1.0)),
+  )
+}

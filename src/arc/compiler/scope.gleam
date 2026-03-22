@@ -14,9 +14,10 @@ import arc/compiler/emit.{
   LetBinding, ParamBinding, VarBinding,
 }
 import arc/vm/opcode.{
-  type IrOp, IrBoxLocal, IrGetBoxed, IrGetGlobal, IrGetLocal, IrPushConst,
-  IrPutBoxed, IrPutGlobal, IrPutLocal, IrScopeGetVar, IrScopePutVar,
-  IrScopeTypeofVar, IrTypeOf, IrTypeofGlobal,
+  type IrOp, IrBoxLocal, IrDeclareEvalVar, IrDeclareGlobalVar, IrGetBoxed,
+  IrGetEvalVar, IrGetGlobal, IrGetLocal, IrPushConst, IrPutBoxed, IrPutEvalVar,
+  IrPutGlobal, IrPutLocal, IrScopeGetVar, IrScopePutVar, IrScopeTypeofVar,
+  IrTypeOf, IrTypeofEvalVar, IrTypeofGlobal,
 }
 import arc/vm/value.{type JsValue, JsUndefined, JsUninitialized}
 import gleam/dict.{type Dict}
@@ -27,6 +28,15 @@ import gleam/set.{type Set}
 // ============================================================================
 // Types
 // ============================================================================
+
+/// Where unresolved names fall through to. ToGlobal is the normal case.
+/// ToEvalEnv is used when compiling sloppy direct-eval code OR sloppy
+/// functions that contain a direct eval — those frames carry an eval_env
+/// dict that GetEvalVar/PutEvalVar check before the global object.
+pub type GlobalFallthrough {
+  ToGlobal
+  ToEvalEnv
+}
 
 /// A binding in a scope — maps name to local slot index.
 type Binding {
@@ -51,6 +61,7 @@ type Resolver {
     /// Names of variables that are captured by child closures.
     /// Variables in this set will be boxed (stored via BoxSlot indirection).
     captured_vars: Set(String),
+    fallthrough: GlobalFallthrough,
   )
 }
 
@@ -65,6 +76,7 @@ pub fn resolve(
   constants: List(JsValue),
   constants_map: Dict(JsValue, Int),
   captured_vars: Set(String),
+  fallthrough: GlobalFallthrough,
 ) -> #(List(IrOp), Int, List(JsValue), Dict(JsValue, Int)) {
   let r =
     Resolver(
@@ -76,6 +88,7 @@ pub fn resolve(
       constants_map:,
       next_const: list.length(constants),
       captured_vars:,
+      fallthrough:,
     )
   let r = resolve_ops(r, code)
   #(list.reverse(r.output), r.max_locals, r.constants, r.constants_map)
@@ -91,6 +104,7 @@ pub fn resolve_with_captures(
   constants_map: Dict(JsValue, Int),
   captures: List(String),
   captured_vars: Set(String),
+  fallthrough: GlobalFallthrough,
 ) -> #(List(IrOp), Int, List(JsValue), Dict(JsValue, Int)) {
   let capture_count = list.length(captures)
   // Pre-populate a function scope with capture bindings (always boxed)
@@ -110,6 +124,7 @@ pub fn resolve_with_captures(
       constants_map:,
       next_const: list.length(constants),
       captured_vars:,
+      fallthrough:,
     )
   let r = resolve_ops(r, code)
   #(list.reverse(r.output), r.max_locals, r.constants, r.constants_map)
@@ -190,15 +205,16 @@ fn resolve_one(r: Resolver, op: EmitterOp) -> Resolver {
             False -> r
           }
         }
-        ParamBinding -> {
-          // Params are set by call convention. Box if captured.
+        ParamBinding | CatchBinding -> {
+          // Params: set by call convention. Catch: set by unwind.
+          // Both need BoxLocal if captured (or if eval is present).
           case boxed {
             True -> emit(r, IrBoxLocal(index))
             False -> r
           }
         }
-        CatchBinding | CaptureBinding -> r
-        // Catch: set by unwind. Captures: already boxed refs from parent.
+        CaptureBinding -> r
+        // Captures: already boxed refs from parent, never re-box.
       }
     }
 
@@ -206,7 +222,11 @@ fn resolve_one(r: Resolver, op: EmitterOp) -> Resolver {
       case lookup(r.scopes, name) {
         Some(Binding(index:, is_boxed: True, ..)) -> emit(r, IrGetBoxed(index))
         Some(Binding(index:, is_boxed: False, ..)) -> emit(r, IrGetLocal(index))
-        None -> emit(r, IrGetGlobal(name))
+        None ->
+          case r.fallthrough {
+            ToGlobal -> emit(r, IrGetGlobal(name))
+            ToEvalEnv -> emit(r, IrGetEvalVar(name))
+          }
       }
     }
 
@@ -214,9 +234,19 @@ fn resolve_one(r: Resolver, op: EmitterOp) -> Resolver {
       case lookup(r.scopes, name) {
         Some(Binding(index:, is_boxed: True, ..)) -> emit(r, IrPutBoxed(index))
         Some(Binding(index:, is_boxed: False, ..)) -> emit(r, IrPutLocal(index))
-        None -> emit(r, IrPutGlobal(name))
+        None ->
+          case r.fallthrough {
+            ToGlobal -> emit(r, IrPutGlobal(name))
+            ToEvalEnv -> emit(r, IrPutEvalVar(name))
+          }
       }
     }
+
+    Ir(IrDeclareGlobalVar(name)) ->
+      case r.fallthrough {
+        ToGlobal -> emit(r, IrDeclareGlobalVar(name))
+        ToEvalEnv -> emit(r, IrDeclareEvalVar(name))
+      }
 
     Ir(IrScopeTypeofVar(name)) -> {
       case lookup(r.scopes, name) {
@@ -228,7 +258,11 @@ fn resolve_one(r: Resolver, op: EmitterOp) -> Resolver {
           let r = emit(r, IrGetLocal(index))
           emit(r, IrTypeOf)
         }
-        None -> emit(r, IrTypeofGlobal(name))
+        None ->
+          case r.fallthrough {
+            ToGlobal -> emit(r, IrTypeofGlobal(name))
+            ToEvalEnv -> emit(r, IrTypeofEvalVar(name))
+          }
       }
     }
 

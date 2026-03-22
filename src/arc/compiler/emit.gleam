@@ -71,6 +71,10 @@ pub type CompiledChild {
     is_derived_constructor: Bool,
     is_generator: Bool,
     is_async: Bool,
+    /// True if this function contains a syntactic `eval(...)` call with
+    /// identifier callee. Such functions get all locals boxed and a
+    /// name→index table stored on FuncTemplate so direct eval can see them.
+    has_eval_call: Bool,
   )
 }
 
@@ -97,6 +101,10 @@ pub opaque type Emitter {
     /// functions; can be upgraded (never downgraded) by a "use strict"
     /// directive in the function body prologue. Classes force strict.
     strict: Bool,
+    /// Set to True when a syntactic `eval(...)` (identifier callee) is
+    /// encountered. Propagated to CompiledChild so the compiler knows to
+    /// box all locals in this function for direct eval access.
+    has_eval_call: Bool,
   )
 }
 
@@ -476,6 +484,7 @@ fn new_emitter() -> Emitter {
     next_func: 0,
     pending_label: None,
     strict: False,
+    has_eval_call: False,
   )
 }
 
@@ -1229,6 +1238,7 @@ fn compile_function_body(
     is_derived_constructor: False,
     is_generator:,
     is_async:,
+    has_eval_call: e.has_eval_call,
   )
 }
 
@@ -1958,6 +1968,27 @@ fn emit_expr(e: Emitter, expr: ast.Expression) -> Result(Emitter, EmitError) {
         }
       }
     }
+    // Direct eval candidate: `eval(args)` with identifier callee.
+    // Emits IrCallEval so the VM can do a runtime identity check against
+    // the intrinsic eval. If it matches → direct eval (sees caller's locals).
+    // If not (eval was shadowed/rebound) → regular call semantics.
+    // Spread in eval(...args) is legal but rare; we fall through to regular
+    // CallApply which gives indirect-eval semantics (acceptable for v1).
+    ast.CallExpression(ast.Identifier("eval"), args) ->
+      case has_spread_arg(args) {
+        False -> {
+          let e = emit_ir(e, IrScopeGetVar("eval"))
+          use e <- result.map(list.try_fold(args, e, emit_expr))
+          let e = emit_ir(e, opcode.IrCallEval(list.length(args)))
+          Emitter(..e, has_eval_call: True)
+        }
+        True -> {
+          let e = emit_ir(e, IrScopeGetVar("eval"))
+          use e <- result.map(emit_args_array_with_spread(e, args))
+          emit_ir(e, IrCallApply)
+        }
+      }
+
     // Regular call expression
     ast.CallExpression(callee, args) -> {
       use e <- result.try(emit_expr(e, callee))

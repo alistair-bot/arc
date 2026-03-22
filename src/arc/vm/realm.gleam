@@ -16,7 +16,7 @@ import arc/vm/value.{
 }
 import gleam/dict
 import gleam/list
-import gleam/option.{Some}
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/set
 import gleam/string
@@ -577,6 +577,159 @@ pub fn eval_native(
     // Non-string first arg: return it unchanged (spec §19.2.1 step 2)
     [x, ..] -> #(state, Ok(x))
     [] -> #(state, Ok(JsUndefined))
+  }
+}
+
+/// ES2024 §19.2.1.1 PerformEval — the DIRECT eval path.
+/// Runs with access to the caller's local variables via boxed-local aliasing:
+/// the caller's FuncTemplate.local_names maps name→slot-index, and each such
+/// slot holds a BoxSlot ref. We compile the eval'd source with those names as
+/// pre-boxed captures in slots 0..N-1, then seed those slots with the caller's
+/// box refs so GetBoxed/PutBoxed alias the same heap cells.
+///
+/// Falls back to indirect eval when the caller has no local_names (e.g. the
+/// eval call is at top-level or the compiler couldn't build the table).
+pub fn direct_eval_native(
+  args: List(JsValue),
+  state: State,
+  execute_inner: ExecuteInnerFn,
+  new_state_fn: NewStateFn,
+) -> #(State, Result(JsValue, JsValue)) {
+  case args {
+    [JsString(source), ..] ->
+      case state.func.local_names {
+        None ->
+          // No name table: caller wasn't marked (e.g. top-level). Fall back
+          // to indirect eval semantics.
+          run_source_in_current_realm(
+            source,
+            state,
+            execute_inner,
+            new_state_fn,
+          )
+        Some(name_table) ->
+          run_direct_eval(
+            source,
+            name_table,
+            state,
+            execute_inner,
+            new_state_fn,
+          )
+      }
+    // Non-string first arg: return it unchanged (spec §19.2.1 step 2)
+    [x, ..] -> #(state, Ok(x))
+    [] -> #(state, Ok(JsUndefined))
+  }
+}
+
+fn run_direct_eval(
+  source: String,
+  name_table: List(#(String, Int)),
+  state: State,
+  execute_inner: ExecuteInnerFn,
+  new_state_fn: NewStateFn,
+) -> #(State, Result(JsValue, JsValue)) {
+  case parser.parse(source, parser.Script) {
+    Error(err) -> {
+      let #(h, syntax_err) =
+        common.make_syntax_error(
+          state.heap,
+          state.builtins,
+          parser.parse_error_to_string(err),
+        )
+      #(State(..state, heap: h), Error(syntax_err))
+    }
+    Ok(program) -> {
+      // Compile with caller's local names as pre-boxed captures. The eval'd
+      // code's slot i corresponds to name_table[i]'s variable.
+      let parent_names = list.map(name_table, fn(pair) { pair.0 })
+      let caller_strict = state.func.is_strict
+      case compiler.compile_eval_direct(program, parent_names, caller_strict) {
+        Error(err) -> {
+          let #(h, syntax_err) =
+            common.make_syntax_error(
+              state.heap,
+              state.builtins,
+              string.inspect(err),
+            )
+          #(State(..state, heap: h), Error(syntax_err))
+        }
+        Ok(template) -> {
+          // Seed locals[0..N-1] with the caller's box refs (pulled from
+          // caller's locals at the indices in name_table). Remaining slots
+          // default to undefined.
+          let caller_box_refs =
+            list.map(name_table, fn(pair) {
+              tuple_array.get(pair.1, state.locals)
+              |> option.unwrap(JsUndefined)
+            })
+          let remaining = template.local_count - list.length(caller_box_refs)
+          let locals =
+            list.append(caller_box_refs, list.repeat(JsUndefined, remaining))
+            |> tuple_array.from_list
+          // Sloppy: `var` declarations land in the caller's eval_env dict.
+          // Allocate lazily so subsequent evals in the same frame share it.
+          // Strict: compile_eval_direct rewrites those vars to locals in the
+          // eval body, so no eval_env needed.
+          let #(h, eval_env) = case caller_strict, state.eval_env {
+            True, _ -> #(state.heap, None)
+            False, Some(ref) -> #(state.heap, Some(ref))
+            False, None -> {
+              let #(h, ref) =
+                heap.alloc(state.heap, value.EvalEnvSlot(dict.new()))
+              #(h, Some(ref))
+            }
+          }
+          let eval_state =
+            State(
+              ..new_state_fn(
+                template,
+                locals,
+                h,
+                state.builtins,
+                state.global_object,
+                state.lexical_globals,
+                state.const_lexical_globals,
+                state.symbol_descriptions,
+                state.symbol_registry,
+                state.event_loop,
+              ),
+              job_queue: state.job_queue,
+              realms: state.realms,
+              // Direct eval inherits the caller's `this` (spec §19.2.1.1
+              // step 27.a — the calling context's LexicalEnvironment).
+              this_binding: state.this_binding,
+              eval_env:,
+            )
+          case execute_inner(eval_state) {
+            Error(vm_err) ->
+              state.type_error(
+                state,
+                "eval: VM error: " <> string.inspect(vm_err),
+              )
+            Ok(#(completion, final_state)) -> {
+              let state =
+                State(
+                  ..state.merge_globals(state, final_state, []),
+                  heap: final_state.heap,
+                  symbol_descriptions: final_state.symbol_descriptions,
+                  symbol_registry: final_state.symbol_registry,
+                  realms: final_state.realms,
+                  eval_env:,
+                )
+              case completion {
+                NormalCompletion(val, _) -> #(state, Ok(val))
+                ThrowCompletion(thrown, _) -> #(state, Error(thrown))
+                YieldCompletion(_, _) ->
+                  state.type_error(state, "eval: unexpected yield")
+                completion.AwaitCompletion(_, _) ->
+                  state.type_error(state, "eval: unexpected await")
+              }
+            }
+          }
+        }
+      }
+    }
   }
 }
 

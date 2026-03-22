@@ -13,7 +13,7 @@ import arc/vm/opcode
 import arc/vm/value.{type FuncTemplate, CaptureLocal}
 import gleam/dict.{type Dict}
 import gleam/list
-import gleam/option.{None}
+import gleam/option.{None, Some}
 import gleam/result
 import gleam/set
 
@@ -63,7 +63,13 @@ fn compile_module_with_scope(
     Ok(#(emitter_ops, constants, constants_map, children, is_strict)) -> {
       let captured_vars = collect_all_captured_vars(children, emitter_ops)
       let #(ir_ops, local_count, constants, _constants_map) =
-        scope.resolve(emitter_ops, constants, constants_map, captured_vars)
+        scope.resolve(
+          emitter_ops,
+          constants,
+          constants_map,
+          captured_vars,
+          scope.ToGlobal,
+        )
       let parent_scope = build_scope_dict(emitter_ops)
       let child_templates = list.map(children, compile_child(_, parent_scope))
       let template =
@@ -80,6 +86,7 @@ fn compile_module_with_scope(
           False,
           False,
           False,
+          None,
         )
       Ok(#(template, parent_scope))
     }
@@ -94,6 +101,85 @@ pub fn compile_repl(program: ast.Program) -> Result(FuncTemplate, CompileError) 
   case program {
     ast.Script(body) -> compile_script(body, emit.emit_program_repl)
     ast.Module(_) -> Error(Unsupported("modules not supported in REPL"))
+  }
+}
+
+/// Compile code for a DIRECT eval call. Like compile_repl, but seeds the
+/// scope with the caller's local variable names as pre-boxed captures in
+/// slots 0..N-1. Free vars matching a parent name emit GetBoxed/PutBoxed
+/// against those slots. At runtime, the caller's BoxSlot refs are copied
+/// into locals[0..N-1] so reads/writes alias the caller's variables.
+///
+/// When the caller is sloppy AND the eval'd code is sloppy, `var`
+/// declarations at eval top-level emit DeclareEvalVar (land in the caller's
+/// eval_env dict) and unresolved names emit GetEvalVar/PutEvalVar (check
+/// eval_env before global). When either side is strict, eval gets its own
+/// var environment — fall through to globals as before.
+pub fn compile_eval_direct(
+  program: ast.Program,
+  parent_names: List(String),
+  caller_is_strict: Bool,
+) -> Result(FuncTemplate, CompileError) {
+  case program {
+    ast.Module(_) -> Error(Unsupported("modules not supported in eval"))
+    ast.Script(body) ->
+      case emit.emit_program_repl(body) {
+        Error(emit.BreakOutsideLoop) -> Error(BreakOutsideLoop)
+        Error(emit.ContinueOutsideLoop) -> Error(ContinueOutsideLoop)
+        Error(emit.Unsupported(desc)) -> Error(Unsupported(desc))
+        Ok(#(emitter_ops, constants, constants_map, children, is_strict)) -> {
+          let strict = caller_is_strict || is_strict
+          // Strict direct eval gets its own VarEnvironment (spec §19.2.1.1
+          // step 12): rewrite hoisted var declarations from DeclareGlobalVar
+          // to local DeclareVar so they stay scoped to the eval body.
+          // Sloppy keeps DeclareGlobalVar which scope.gleam rewrites to
+          // DeclareEvalVar via ToEvalEnv.
+          let emitter_ops = case strict {
+            False -> emitter_ops
+            True ->
+              list.map(emitter_ops, fn(op) {
+                case op {
+                  emit.Ir(opcode.IrDeclareGlobalVar(name)) ->
+                    emit.DeclareVar(name, emit.VarBinding)
+                  _ -> op
+                }
+              })
+          }
+          let captured_vars = collect_all_captured_vars(children, emitter_ops)
+          let fallthrough = case strict {
+            True -> scope.ToGlobal
+            False -> scope.ToEvalEnv
+          }
+          let #(ir_ops, local_count, constants, _cm) =
+            scope.resolve_with_captures(
+              emitter_ops,
+              constants,
+              constants_map,
+              parent_names,
+              captured_vars,
+              fallthrough,
+            )
+          let parent_scope =
+            build_scope_dict_with_captures(emitter_ops, parent_names)
+          let child_templates =
+            list.map(children, compile_child(_, parent_scope))
+          Ok(resolve.resolve(
+            ir_ops,
+            constants,
+            local_count,
+            child_templates,
+            None,
+            0,
+            [],
+            is_strict,
+            False,
+            False,
+            False,
+            False,
+            None,
+          ))
+        }
+      }
   }
 }
 
@@ -241,7 +327,13 @@ fn compile_script(
 
       // Phase 2: Resolve scopes (names → local indices), with capture info
       let #(ir_ops, local_count, constants, _constants_map) =
-        scope.resolve(emitter_ops, constants, constants_map, captured_vars)
+        scope.resolve(
+          emitter_ops,
+          constants,
+          constants_map,
+          captured_vars,
+          scope.ToGlobal,
+        )
 
       // Build scope dict for this level (name → local index)
       let parent_scope = build_scope_dict(emitter_ops)
@@ -264,6 +356,7 @@ fn compile_script(
           False,
           False,
           False,
+          None,
         )
       Ok(template)
     }
@@ -273,17 +366,37 @@ fn compile_script(
   }
 }
 
+/// True if this function or any nested function contains a syntactic
+/// `eval(...)` call. Used to decide which functions need all-locals-boxed.
+fn any_descendant_has_eval(child: emit.CompiledChild) -> Bool {
+  child.has_eval_call || list.any(child.functions, any_descendant_has_eval)
+}
+
 fn compile_child(
   child: emit.CompiledChild,
   parent_scope: Dict(String, Int),
 ) -> FuncTemplate {
+  // If this function OR any descendant contains a direct eval call, ALL of
+  // this function's locals must be boxed — eval can see the full lexical
+  // chain. QuickJS walks UP parent pointers when it sees eval(; we compute
+  // the transitive flag DOWN instead since Arc compiles parent→child.
+  let eval_in_subtree = any_descendant_has_eval(child)
+
   // Determine which variables this child uses but doesn't declare (free vars)
   let free_vars = collect_free_vars(child)
 
-  // Filter to names that exist in parent scope (others are globals)
-  let captures =
-    set.filter(free_vars, dict.has_key(parent_scope, _))
-    |> set.to_list
+  // Filter to names that exist in parent scope (others are globals).
+  // When eval is present anywhere in this subtree, capture ALL parent-scope
+  // names: eval("x") can reference any enclosing binding and the source
+  // string is opaque to free-var analysis. Threading every box ref through
+  // the closure chain lets direct_eval_native seed the eval'd code with
+  // the full lexical environment.
+  let captures = case eval_in_subtree {
+    False ->
+      set.filter(free_vars, dict.has_key(parent_scope, _))
+      |> set.to_list
+    True -> dict.keys(parent_scope)
+  }
 
   // Build env_descriptors: for each captured name, CaptureLocal(parent_index)
   let env_descriptors =
@@ -296,6 +409,18 @@ fn compile_child(
   let grandchild_captured =
     collect_all_captured_vars(child.functions, child.code)
 
+  let vars_to_box = case eval_in_subtree {
+    False -> grandchild_captured
+    True -> set.union(grandchild_captured, collect_declared_names(child.code))
+  }
+
+  // Sloppy functions that contain a direct eval must resolve unresolved
+  // names through eval_env first (for vars injected by eval("var y=1")).
+  let fallthrough = case eval_in_subtree && !child.is_strict {
+    True -> scope.ToEvalEnv
+    False -> scope.ToGlobal
+  }
+
   // Phase 2: Resolve scopes, with captures pre-populated
   let #(ir_ops, local_count, constants, _constants_map) = case captures {
     [] ->
@@ -303,7 +428,8 @@ fn compile_child(
         child.code,
         child.constants,
         child.constants_map,
-        grandchild_captured,
+        vars_to_box,
+        fallthrough,
       )
     _ ->
       scope.resolve_with_captures(
@@ -311,12 +437,22 @@ fn compile_child(
         child.constants,
         child.constants_map,
         captures,
-        grandchild_captured,
+        vars_to_box,
+        fallthrough,
       )
   }
 
   // Build scope dict for this child (for grandchildren captures)
   let child_scope = build_scope_dict_with_captures(child.code, captures)
+
+  // For direct eval: record name→index so the runtime can map variable
+  // names in the eval'd source to the caller's boxed local slots.
+  // Needed if eval is anywhere in the subtree — a nested eval still
+  // reaches this function's locals through the closure chain.
+  let local_names = case eval_in_subtree {
+    False -> None
+    True -> Some(dict.to_list(child_scope))
+  }
 
   // Recursively compile grandchildren
   let grandchild_templates =
@@ -336,6 +472,7 @@ fn compile_child(
     child.is_derived_constructor,
     child.is_generator,
     child.is_async,
+    local_names,
   )
 }
 

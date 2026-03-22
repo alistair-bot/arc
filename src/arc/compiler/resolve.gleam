@@ -8,20 +8,20 @@ import arc/vm/internal/tuple_array
 import arc/vm/opcode.{
   type IrOp, type Op, IrArrayFrom, IrArrayFromWithHoles, IrArrayPush,
   IrArrayPushHole, IrArraySpread, IrAwait, IrBinOp, IrBoxLocal, IrCall,
-  IrCallApply, IrCallConstructor, IrCallConstructorApply, IrCallMethod,
-  IrCallMethodApply, IrCallSuper, IrCloseVar, IrCreateArguments,
-  IrDeclareGlobalLex, IrDeclareGlobalVar, IrDefineAccessor,
+  IrCallApply, IrCallConstructor, IrCallConstructorApply, IrCallEval,
+  IrCallMethod, IrCallMethodApply, IrCallSuper, IrCloseVar, IrCreateArguments,
+  IrDeclareEvalVar, IrDeclareGlobalLex, IrDeclareGlobalVar, IrDefineAccessor,
   IrDefineAccessorComputed, IrDefineField, IrDefineFieldComputed, IrDefineMethod,
   IrDeleteElem, IrDeleteField, IrDup, IrEnterFinally, IrEnterFinallyThrow,
   IrForInNext, IrForInStart, IrGetAsyncIterator, IrGetBoxed, IrGetElem,
-  IrGetElem2, IrGetField, IrGetField2, IrGetGlobal, IrGetIterator, IrGetLocal,
-  IrGetThis, IrInitGlobalLex, IrInitialYield, IrIteratorClose, IrIteratorNext,
-  IrJump, IrJumpIfFalse, IrJumpIfNullish, IrJumpIfTrue, IrLabel, IrLeaveFinally,
-  IrMakeClosure, IrNewObject, IrNewRegExp, IrObjectSpread, IrPop, IrPopTry,
-  IrPushConst, IrPushTry, IrPutBoxed, IrPutElem, IrPutField, IrPutGlobal,
-  IrPutLocal, IrReturn, IrScopeGetVar, IrScopePutVar, IrScopeTypeofVar,
-  IrSetupDerivedClass, IrSwap, IrThrow, IrTypeOf, IrTypeofGlobal, IrUnaryOp,
-  IrYield,
+  IrGetElem2, IrGetEvalVar, IrGetField, IrGetField2, IrGetGlobal, IrGetIterator,
+  IrGetLocal, IrGetThis, IrInitGlobalLex, IrInitialYield, IrIteratorClose,
+  IrIteratorNext, IrJump, IrJumpIfFalse, IrJumpIfNullish, IrJumpIfTrue, IrLabel,
+  IrLeaveFinally, IrMakeClosure, IrNewObject, IrNewRegExp, IrObjectSpread, IrPop,
+  IrPopTry, IrPushConst, IrPushTry, IrPutBoxed, IrPutElem, IrPutEvalVar,
+  IrPutField, IrPutGlobal, IrPutLocal, IrReturn, IrScopeGetVar, IrScopePutVar,
+  IrScopeTypeofVar, IrSetupDerivedClass, IrSwap, IrThrow, IrTypeOf,
+  IrTypeofEvalVar, IrTypeofGlobal, IrUnaryOp, IrYield,
 }
 import arc/vm/value.{
   type EnvCapture, type FuncTemplate, type JsValue, FuncTemplate,
@@ -47,6 +47,7 @@ pub fn resolve(
   is_derived_constructor: Bool,
   is_generator: Bool,
   is_async: Bool,
+  local_names: Option(List(#(String, Int))),
 ) -> FuncTemplate {
   let label_map = build_label_map(code, 0, dict.new())
   let ops = resolve_ops(code, label_map, [])
@@ -63,6 +64,7 @@ pub fn resolve(
     is_derived_constructor:,
     is_generator:,
     is_async:,
+    local_names:,
   )
 }
 
@@ -132,6 +134,14 @@ fn resolve_ops(
       resolve_ops(rest, labels, [opcode.PutGlobal(name), ..acc])
     [IrTypeofGlobal(name), ..rest] ->
       resolve_ops(rest, labels, [opcode.TypeofGlobal(name), ..acc])
+    [IrGetEvalVar(name), ..rest] ->
+      resolve_ops(rest, labels, [opcode.GetEvalVar(name), ..acc])
+    [IrPutEvalVar(name), ..rest] ->
+      resolve_ops(rest, labels, [opcode.PutEvalVar(name), ..acc])
+    [IrDeclareEvalVar(name), ..rest] ->
+      resolve_ops(rest, labels, [opcode.DeclareEvalVar(name), ..acc])
+    [IrTypeofEvalVar(name), ..rest] ->
+      resolve_ops(rest, labels, [opcode.TypeofEvalVar(name), ..acc])
 
     // 1:1 translations
     [IrPushConst(i), ..rest] ->
@@ -185,6 +195,8 @@ fn resolve_ops(
     // Calls
     [IrCall(arity), ..rest] ->
       resolve_ops(rest, labels, [opcode.Call(arity), ..acc])
+    [IrCallEval(arity), ..rest] ->
+      resolve_ops(rest, labels, [opcode.CallEval(arity), ..acc])
     [IrCallMethod(name, arity), ..rest] ->
       resolve_ops(rest, labels, [opcode.CallMethod(name, arity), ..acc])
     [IrCallConstructor(arity), ..rest] ->

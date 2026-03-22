@@ -149,6 +149,17 @@ pub fn read_box(h: Heap, ref: Ref) -> Option(value.JsValue) {
   }
 }
 
+/// Read an EvalEnvSlot's var dict.
+pub fn read_eval_env(
+  h: Heap,
+  ref: Ref,
+) -> Option(dict.Dict(String, value.JsValue)) {
+  case read(h, ref) {
+    Some(value.EvalEnvSlot(vars:)) -> Some(vars)
+    _ -> None
+  }
+}
+
 /// Read a PidObject's Erlang pid.
 pub fn read_pid(h: Heap, ref: Ref) -> Option(value.ErlangPid) {
   case read(h, ref) {

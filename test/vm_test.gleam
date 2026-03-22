@@ -57,6 +57,7 @@ fn make_func(
     is_derived_constructor: False,
     is_generator: False,
     is_async: False,
+    local_names: None,
   )
 }
 

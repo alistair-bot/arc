@@ -93,7 +93,8 @@ pub fn to_number_int(val: JsValue) -> Option(Int) {
 fn string_to_number_int(s: String) -> Option(Int) {
   case s {
     "" -> Some(0)
-    "0x" <> rest | "0X" <> rest -> int.base_parse(rest, 16) |> option.from_result
+    "0x" <> rest | "0X" <> rest ->
+      int.base_parse(rest, 16) |> option.from_result
     "0o" <> rest | "0O" <> rest -> int.base_parse(rest, 8) |> option.from_result
     "0b" <> rest | "0B" <> rest -> int.base_parse(rest, 2) |> option.from_result
     _ ->

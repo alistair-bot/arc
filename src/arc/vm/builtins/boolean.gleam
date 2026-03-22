@@ -1,6 +1,6 @@
 import arc/vm/builtins/common.{type BuiltinType}
-import arc/vm/frame.{type State}
 import arc/vm/heap.{type Heap}
+import arc/vm/state.{type State}
 import arc/vm/value.{
   type BooleanNativeFn, type JsValue, type Ref, BooleanConstructor,
   BooleanNative, BooleanObject, BooleanPrototypeToString,
@@ -112,7 +112,7 @@ pub fn boolean_value_of(
   case this_boolean_value(state, this) {
     Some(b) -> #(state, Ok(JsBool(b)))
     None ->
-      frame.type_error(
+      state.type_error(
         state,
         "Boolean.prototype.valueOf requires that 'this' be a Boolean",
       )
@@ -138,7 +138,7 @@ pub fn boolean_to_string(
     Some(False) -> #(state, Ok(JsString("false")))
     // Step 1 threw: thisBooleanValue returned abrupt completion (TypeError).
     None ->
-      frame.type_error(
+      state.type_error(
         state,
         "Boolean.prototype.toString requires that 'this' be a Boolean",
       )

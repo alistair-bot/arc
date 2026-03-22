@@ -1,9 +1,9 @@
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/ops/object
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type ArrayNativeFn, type JsElements, type JsValue, type Property, type Ref,
   ArrayConstructor, ArrayFrom, ArrayIsArray, ArrayNative, ArrayObject, ArrayOf,
@@ -214,7 +214,7 @@ fn native_array_constructor(
     // 2. Assert: numberOfArgs = 0.
     // 3. (NewTarget handling — skipped, no subclassing)
     // 4. Return ! ArrayCreate(0, proto).
-    [] -> alloc_array(heap, 0, js_elements.new(), array_proto)
+    [] -> alloc_array(heap, 0, elements.new(), array_proto)
 
     // §23.1.1.2 Array(len) — numberOfArgs = 1
     // 5. If len is not a Number, then
@@ -230,7 +230,7 @@ fn native_array_constructor(
     [JsNumber(value.Finite(n))] -> {
       let len = value.float_to_int(n)
       case len >= 0 && int.to_float(len) == n {
-        True -> alloc_array(heap, len, js_elements.new(), array_proto)
+        True -> alloc_array(heap, len, elements.new(), array_proto)
         // intLen ≠ len → RangeError (spec step 6b)
         False -> {
           let #(heap, err) =
@@ -245,7 +245,7 @@ fn native_array_constructor(
     //  through here and are treated as items, producing the same result)
     _ -> {
       let count = list.length(args)
-      alloc_array(heap, count, js_elements.from_list(args), array_proto)
+      alloc_array(heap, count, elements.from_list(args), array_proto)
     }
   }
 }
@@ -313,7 +313,7 @@ pub fn array_join(
     [JsUndefined, ..] | [] -> JsString(",")
     [v, ..] -> v
   }
-  use separator, state <- frame.try_to_string(state, sep_val)
+  use separator, state <- state.try_to_string(state, sep_val)
   // Steps 5-8: Build result string R by iterating k from 0 to len-1,
   //            joining elements with sep. Return R.
   case join_elements(elements, 0, length, separator, [], state) {
@@ -340,7 +340,7 @@ fn join_elements(
     True -> #(state, Ok(acc |> list.reverse |> string.join(separator)))
     False -> {
       // Step 7b: Let element be ? Get(O, ! ToString(𝔽(k))).
-      let val = js_elements.get(elements, idx)
+      let val = elements.get(elements, idx)
       case val {
         // Step 7c: If element is undefined or null, let next be "".
         JsUndefined | JsNull ->
@@ -354,7 +354,7 @@ fn join_elements(
           )
         // Step 7c (cont.): Otherwise, let next be ? ToString(element).
         _ -> {
-          use str, state <- frame.try_to_string(state, val)
+          use str, state <- state.try_to_string(state, val)
           // Step 7d: Set R to string-concatenation of R and next.
           // Step 7e: Set k to k + 1.
           join_elements(
@@ -387,7 +387,7 @@ pub fn array_push(
   // NOTE: Step 4 (overflow check) is not implemented — we don't guard
   // against len + argCount exceeding MAX_SAFE_INTEGER.
   // Steps 5-7 delegated to push_generic.
-  use new_length, state <- frame.try_op(push_generic(state, ref, length, args))
+  use new_length, state <- state.try_op(push_generic(state, ref, length, args))
   // Step 7: Return 𝔽(len).
   #(state, Ok(js_int(new_length)))
 }
@@ -472,7 +472,7 @@ const invalid_ref = value.Ref(-1)
 /// For non-array objects, indexed values may live in the `properties` dict
 /// as string keys ("0", "1", ...) rather than `elements` — put_elem_value
 /// stores them that way for OrdinaryObject. We merge both sources into a
-/// fresh SparseElements so `js_elements.has`/`get` give correct hole semantics.
+/// fresh SparseElements so `elements.has`/`get` give correct hole semantics.
 fn require_array(
   this: JsValue,
   state: State,
@@ -526,10 +526,10 @@ fn require_array(
           cont(ref, length, elements, state)
         }
         // Non-object heap slot under a ref shouldn't happen, but fall through.
-        _ -> cont(ref, 0, js_elements.new(), state)
+        _ -> cont(ref, 0, elements.new(), state)
       }
     // §7.1.18: Undefined / Null → throw a TypeError exception.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // §7.1.18 String row: ToObject creates a String exotic object (§10.4.3).
     // We don't actually allocate the wrapper — just synthesize elements inline
     // via StringGetOwnProperty (§10.4.3.5) semantics.
@@ -541,7 +541,7 @@ fn require_array(
     }
     // §7.1.18 Boolean/Number/Symbol/BigInt rows: ToObject creates a wrapper
     // object with no own `.length` property → LengthOfArrayLike returns 0.
-    _ -> cont(invalid_ref, 0, js_elements.new(), state)
+    _ -> cont(invalid_ref, 0, elements.new(), state)
   }
 }
 
@@ -584,10 +584,7 @@ fn string_to_elements(s: String) -> #(Int, JsElements) {
     })
   // Each element corresponds to one UTF-16 code unit index position.
   // §10.4.3.5 step 8: len = number of code units in [[StringData]].
-  #(
-    list.length(code_units),
-    js_elements.from_list(list.map(code_units, JsString)),
-  )
+  #(list.length(code_units), elements.from_list(list.map(code_units, JsString)))
 }
 
 /// Convert a surrogate code unit (0xD800-0xDFFF range) to a one-char string.
@@ -669,7 +666,7 @@ fn apply_property_overrides(
             value.SparseElements(collect_elements(
               elems,
               0,
-              js_elements.stored_count(elems),
+              elements.stored_count(elems),
               length,
               dict.new(),
             ))
@@ -686,7 +683,7 @@ fn apply_property_overrides(
             value.SparseElements(dict.insert(sparse_data, idx, v)),
           )
           value.AccessorProperty(get: Some(getter), ..) ->
-            case frame.call(state, getter, this, []) {
+            case state.call(state, getter, this, []) {
               Ok(#(v, state)) -> #(
                 state,
                 value.SparseElements(dict.insert(sparse_data, idx, v)),
@@ -762,7 +759,7 @@ fn gather_indexed_loop(
           )
         Ok(value.AccessorProperty(get: Some(getter), ..)) ->
           // Call the getter
-          case frame.call(state, getter, this, []) {
+          case state.call(state, getter, this, []) {
             Ok(#(v, state)) ->
               gather_indexed_loop(
                 state,
@@ -801,7 +798,7 @@ fn gather_indexed_loop(
           )
         Error(Nil) ->
           // Not an own string property — check elements dict, then prototype
-          case js_elements.get_option(elements, idx) {
+          case elements.get_option(elements, idx) {
             Some(v) ->
               gather_indexed_loop(
                 state,
@@ -877,9 +874,9 @@ fn collect_elements(
     True -> acc
     False -> {
       // §7.3.1 HasProperty(O, P): check if index is present (not a hole).
-      let acc = case js_elements.has(elements, idx) {
+      let acc = case elements.has(elements, idx) {
         // §7.3.2 Get(O, P): retrieve the value at this index.
-        True -> dict.insert(acc, idx, js_elements.get(elements, idx))
+        True -> dict.insert(acc, idx, elements.get(elements, idx))
         False -> acc
       }
       collect_elements(elements, idx + 1, stored, length, acc)
@@ -918,7 +915,7 @@ fn require_callback(
     True -> cont(cb, this_arg, state)
     // Step 2: If IsCallable(callbackfn) is false, throw a TypeError exception.
     False ->
-      frame.type_error(
+      state.type_error(
         state,
         common.typeof_value(cb, state.heap) <> " is not a function",
       )
@@ -1166,7 +1163,7 @@ pub fn array_pop(
       // Step 4b: newLen = len - 1
       let new_len = length - 1
       // Step 4d: element = Get(O, ToString(newLen))
-      use val, state <- frame.try_op(generic_get(state, ref, new_len))
+      use val, state <- state.try_op(generic_get(state, ref, new_len))
       // Step 4e: DeletePropertyOrThrow(O, index)
       use state <- try_wrap(generic_delete(state, ref, int.to_string(new_len)))
       // Step 4f: Set(O, "length", newLen, true)
@@ -1214,7 +1211,7 @@ pub fn array_shift(
     True -> wrap(generic_set_length(state, ref, 0), JsUndefined)
     False -> {
       // Step 4: first = Get(O, "0")
-      use val, state <- frame.try_op(generic_get(state, ref, 0))
+      use val, state <- state.try_op(generic_get(state, ref, 0))
       // Steps 5-6: shift indices [1..len) down by 1 (see shift_left_generic)
       use state <- try_wrap(shift_left_generic(state, ref, 1, length))
       // Step 7: DeletePropertyOrThrow(O, ToString(len - 1))
@@ -1327,13 +1324,13 @@ pub fn array_unshift(
       #(State(..state, heap:), Error(err))
     }
     False -> {
-      use state <- frame.try_state(shift_right_generic(
+      use state <- state.try_state(shift_right_generic(
         state,
         ref,
         length - 1,
         arg_count,
       ))
-      use state <- frame.try_state(write_list_at(state, ref, 0, args))
+      use state <- state.try_state(write_list_at(state, ref, 0, args))
       wrap(generic_set_length(state, ref, new_len), js_int(new_len))
     }
   }
@@ -1482,7 +1479,7 @@ fn try_wrap(
 ///   - Steps 3-10 are handled by resolve_index (see §7.1.22 / clamp logic).
 ///   - Step 12: we skip ArraySpeciesCreate and always create a plain Array.
 ///     This means @@species is not respected (a known simplification).
-///   - Steps 14b-14c: copy_range uses js_elements.has for HasProperty on the
+///   - Steps 14b-14c: copy_range uses elements.has for HasProperty on the
 ///     source elements, preserving holes (sparse indices are not copied).
 ///   - Step 15: length is set via ArrayObject(count) in the slot constructor
 ///     rather than a separate Set("length") call.
@@ -1508,7 +1505,7 @@ pub fn array_slice(
   let count = int.max(end - start, 0)
   // Steps 12-14: Create result array A, copy elements [k..final) into it.
   // Holes (kPresent = false) are preserved by copy_range skipping them.
-  let copied = copy_range(elements, start, 0, count, js_elements.new())
+  let copied = copy_range(elements, start, 0, count, elements.new())
   let #(heap, ref) =
     heap.alloc(
       state.heap,
@@ -1550,7 +1547,7 @@ fn copy_range(
     True -> dst
     False ->
       // Step 14b: kPresent = HasProperty(O, Pk).
-      case js_elements.has(src, src_idx) {
+      case elements.has(src, src_idx) {
         // Step 14c: kPresent is true — copy the element.
         True ->
           copy_range(
@@ -1558,7 +1555,7 @@ fn copy_range(
             src_idx + 1,
             dst_idx + 1,
             remaining - 1,
-            js_elements.set(dst, dst_idx, js_elements.get(src, src_idx)),
+            elements.set(dst, dst_idx, elements.get(src, src_idx)),
           )
         // kPresent is false (hole): skip — do not set dst[dst_idx].
         False -> copy_range(src, src_idx + 1, dst_idx + 1, remaining - 1, dst)
@@ -1614,13 +1611,13 @@ pub fn array_concat(
   let array_proto = state.builtins.array.prototype
   // Step 1: Let O be ? ToObject(this value).
   case this {
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     _ -> {
       // Step 4: Prepend O to items.
       let all_items = [this, ..args]
       // Steps 3, 5: n = 0, then iterate each element E of items.
       let #(heap, elements, length) =
-        list.fold(all_items, #(state.heap, js_elements.new(), 0), fn(acc, item) {
+        list.fold(all_items, #(state.heap, elements.new(), 0), fn(acc, item) {
           let #(h, elems, pos) = acc
           // Step 5a-c: IsConcatSpreadable check + spread or append.
           concat_item(h, elems, pos, item)
@@ -1677,10 +1674,10 @@ fn concat_item(
           #(h, copied, pos + length)
         }
         // Step 5c: spreadable = false (non-array object) — append as single item.
-        None -> #(h, js_elements.set(elems, pos, item), pos + 1)
+        None -> #(h, elements.set(elems, pos, item), pos + 1)
       }
     // Step 5c: E is not an object (primitive) — append as single item.
-    _ -> #(h, js_elements.set(elems, pos, item), pos + 1)
+    _ -> #(h, elements.set(elems, pos, item), pos + 1)
   }
 }
 
@@ -1885,7 +1882,7 @@ pub fn array_at(
   // Steps 6-7: bounds check, then Get
   case idx < 0 || idx >= length {
     True -> #(state, Ok(JsUndefined))
-    False -> #(state, Ok(js_elements.get(elements, idx)))
+    False -> #(state, Ok(elements.get(elements, idx)))
   }
 }
 
@@ -2113,13 +2110,13 @@ fn search_forward(
     True -> -1
     False ->
       // indexOf step 9a: kPresent = HasProperty(O, k) — skip if absent
-      case skip_holes && !js_elements.has(elements, idx) {
+      case skip_holes && !elements.has(elements, idx) {
         True ->
           // indexOf step 9c: k = k + 1 (hole skipped)
           search_forward(elements, idx + 1, length, search, eq, skip_holes)
         False ->
           // indexOf step 9b.i-ii / includes step 9a-b: Get + compare
-          case eq(js_elements.get(elements, idx), search) {
+          case eq(elements.get(elements, idx), search) {
             True -> idx
             False ->
               // Step 9c: k = k + 1
@@ -2148,13 +2145,13 @@ fn search_backward(elements: JsElements, idx: Int, search: JsValue) -> Int {
     True -> -1
     False ->
       // Step 9a: kPresent = HasProperty(O, k) — skip holes
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         False ->
           // Step 9c: k = k - 1 (hole skipped)
           search_backward(elements, idx - 1, search)
         True ->
           // Step 9b.i-ii: elementK = Get(O, k), IsStrictlyEqual check
-          case value.strict_equal(js_elements.get(elements, idx), search) {
+          case value.strict_equal(elements.get(elements, idx), search) {
             True -> idx
             False ->
               // Step 9c: k = k - 1
@@ -2196,7 +2193,7 @@ type HoleMode {
 ///     which extracts internal elements directly rather than going through Get.
 ///   - Step 3 is handled by require_callback (IsCallable check + TypeError).
 ///   - Steps 4-5 are handled by iterate_array with SkipHoles mode, which
-///     implements the HasProperty check (step 5b) via js_elements.has and
+///     implements the HasProperty check (step 5b) via elements.has and
 ///     calls the callback with (kValue, k, O) arguments (step 5c.ii).
 ///   - Step 6: return undefined.
 pub fn array_for_each(
@@ -2251,7 +2248,7 @@ pub fn array_for_each(
 ///   - Steps 5-6: map_loop implements the iteration. Holes are preserved
 ///     in the result (callback is not called for absent elements, matching
 ///     step 6b's HasProperty check).
-///   - Step 6c.iii: CreateDataPropertyOrThrow is done via js_elements.set
+///   - Step 6c.iii: CreateDataPropertyOrThrow is done via elements.set
 ///     on the accumulator elements (equivalent for dense arrays).
 ///   - Step 7: finish_array allocates the result array with the collected
 ///     elements and the original length.
@@ -2266,7 +2263,7 @@ pub fn array_map(
   use cb, this_arg, state <- require_callback(args, state)
   // Steps 5-6: iterate, collecting mappedValue at each present index.
   // Step 6c.iii: CreateDataPropertyOrThrow(A, Pk, mappedValue) — done via
-  // js_elements.set on the accumulator (preserves holes: absent source indices
+  // elements.set on the accumulator (preserves holes: absent source indices
   // are never written to the output).
   fold_array(
     state,
@@ -2275,8 +2272,8 @@ pub fn array_map(
     cb,
     this_arg,
     this,
-    js_elements.new(),
-    fn(_state, acc, result, _elem, idx) { js_elements.set(acc, idx, result) },
+    elements.new(),
+    fn(_state, acc, result, _elem, idx) { elements.set(acc, idx, result) },
   )
   // Steps 4+7: ArraySpeciesCreate(O, len), return A
   |> finish_array(length)
@@ -2620,7 +2617,7 @@ pub fn array_sort(
           sort_with_comparefn(state, ref, length, elements, comparefn, this)
         }
         False ->
-          frame.type_error(
+          state.type_error(
             state,
             common.typeof_value(comparefn, state.heap) <> " is not a function",
           )
@@ -2640,7 +2637,7 @@ fn sort_default(
   // Collect defined (non-hole) elements. Undefined values go to end.
   let #(defined, undefs) = collect_sort_elements(elements, length, 0, [], 0)
   // Convert each defined element to string for comparison via ToString.
-  use pairs, state <- frame.try_op(stringify_elements(state, defined, []))
+  use pairs, state <- state.try_op(stringify_elements(state, defined, []))
   // Sort by string key lexicographically (stable sort).
   let sorted = list.sort(pairs, fn(a, b) { string.compare(a.0, b.0) })
   // Write sorted values back, then undefineds, then delete trailing holes.
@@ -2662,12 +2659,12 @@ fn collect_sort_elements(
   case idx >= length {
     True -> #(list.reverse(acc), undefs)
     False ->
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         False ->
           // Hole — skip entirely.
           collect_sort_elements(elements, length, idx + 1, acc, undefs)
         True ->
-          case js_elements.get(elements, idx) {
+          case elements.get(elements, idx) {
             JsUndefined ->
               // Undefined — count but don't include in sort.
               collect_sort_elements(elements, length, idx + 1, acc, undefs + 1)
@@ -2694,7 +2691,7 @@ fn stringify_elements(
   case values {
     [] -> Ok(#(list.reverse(acc), state))
     [val, ..rest] -> {
-      use #(str, state) <- result.try(frame.to_string(state, val))
+      use #(str, state) <- result.try(state.to_string(state, val))
       stringify_elements(state, rest, [#(str, val), ..acc])
     }
   }
@@ -2714,7 +2711,7 @@ fn sort_with_comparefn(
   // Collect defined (non-hole) elements. Undefined values go to end.
   let #(defined, undefs) = collect_sort_elements(elements, length, 0, [], 0)
   // Sort using insertion sort with comparefn.
-  use sorted, state <- frame.try_op(
+  use sorted, state <- state.try_op(
     insertion_sort(state, defined, comparefn, []),
   )
   let all_values = list.append(sorted, list.repeat(JsUndefined, undefs))
@@ -2758,7 +2755,7 @@ fn insert_into_sorted(
     [head, ..tail] -> {
       // Call comparefn(elem, head) to determine ordering.
       use #(result, state) <- result.try(
-        frame.call(state, comparefn, JsUndefined, [elem, head]),
+        state.call(state, comparefn, JsUndefined, [elem, head]),
       )
       // SortCompare: if result is NaN, treat as +0 (equal).
       let cmp = case result {
@@ -2842,7 +2839,7 @@ fn delete_trailing(
 /// The key difference: Pattern A checks HasProperty first (skips holes),
 /// Pattern B always calls Get (holes become undefined). This is controlled
 /// by the `hole_mode` parameter:
-///   - SkipHoles → Pattern A (HasProperty check via js_elements.has)
+///   - SkipHoles → Pattern A (HasProperty check via elements.has)
 ///   - VisitHoles → Pattern B (always visit, holes read as undefined)
 ///
 /// The `stop_on` predicate controls the early-exit condition:
@@ -2942,7 +2939,7 @@ fn iterate_loop(
       // Pattern B: no HasProperty check, always visits.
       let should_visit = case hole_mode {
         VisitHoles -> True
-        SkipHoles -> js_elements.has(elements, idx)
+        SkipHoles -> elements.has(elements, idx)
       }
       case should_visit {
         // Pattern A step 5b-c: kPresent is false → skip, advance k.
@@ -2962,11 +2959,11 @@ fn iterate_loop(
           )
         True -> {
           // Pattern A step 5c.i / Pattern B step 4b: kValue = Get(O, Pk).
-          // For holes with VisitHoles, js_elements.get returns JsUndefined.
-          let elem = js_elements.get(elements, idx)
+          // For holes with VisitHoles, elements.get returns JsUndefined.
+          let elem = elements.get(elements, idx)
           // Pattern A step 5c.ii / Pattern B step 4c:
           // testResult = ToBoolean(Call(callbackfn, thisArg, « kValue, 𝔽(k), O »)).
-          use result, state <- frame.try_call(state, cb, this_arg, [
+          use result, state <- state.try_call(state, cb, this_arg, [
             elem,
             js_int(idx),
             arr,
@@ -3052,7 +3049,7 @@ fn fold_loop(
     True -> #(state, Ok(acc))
     False ->
       // Step 6b: kPresent = HasProperty(O, Pk)
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         // kPresent is false → skip (step 6d: k = k + 1)
         False ->
           fold_loop(
@@ -3068,9 +3065,9 @@ fn fold_loop(
           )
         True -> {
           // Step 6c.i: kValue = Get(O, Pk)
-          let elem = js_elements.get(elements, idx)
+          let elem = elements.get(elements, idx)
           // Step 6c.ii: result = Call(callbackfn, thisArg, « kValue, 𝔽(k), O »)
-          use result, state <- frame.try_call(state, cb, this_arg, [
+          use result, state <- state.try_call(state, cb, this_arg, [
             elem,
             js_int(idx),
             arr,
@@ -3142,7 +3139,7 @@ pub fn array_reduce(
   // Step 3: If IsCallable(callbackfn) is false, throw a TypeError exception.
   use <- bool.guard(
     !helpers.is_callable(state.heap, cb),
-    frame.type_error(
+    state.type_error(
       state,
       common.typeof_value(cb, state.heap) <> " is not a function",
     ),
@@ -3162,7 +3159,7 @@ pub fn array_reduce(
       case find_present(elements, 0, length, 1) {
         // Step 4/8c: If len=0 or no present element found, throw TypeError.
         None ->
-          frame.type_error(state, "Reduce of empty array with no initial value")
+          state.type_error(state, "Reduce of empty array with no initial value")
         // Step 8b.iii: Set accumulator to Get(O, Pk), then k = k + 1.
         // Step 9: Enter main loop starting at first_idx + 1.
         Some(#(first_idx, first_val)) ->
@@ -3224,7 +3221,7 @@ pub fn array_reduce_right(
   // Step 3: If IsCallable(callbackfn) is false, throw a TypeError exception.
   use <- bool.guard(
     !helpers.is_callable(state.heap, cb),
-    frame.type_error(
+    state.type_error(
       state,
       common.typeof_value(cb, state.heap) <> " is not a function",
     ),
@@ -3243,7 +3240,7 @@ pub fn array_reduce_right(
       case find_present(elements, length - 1, -1, -1) {
         // Step 4/8c: If len=0 or no present element found, throw TypeError.
         None ->
-          frame.type_error(state, "Reduce of empty array with no initial value")
+          state.type_error(state, "Reduce of empty array with no initial value")
         // Step 8b.iii: Set accumulator to Get(O, Pk), then k = k - 1.
         // Step 9: Enter main loop starting at first_idx - 1 (backward).
         Some(#(first_idx, first_val)) ->
@@ -3270,8 +3267,8 @@ pub fn array_reduce_right(
 /// For reduceRight (step=-1): step 8b says "Repeat, while kPresent is false and k ≥ 0"
 ///   — scans backward from index len-1.
 ///
-/// Step 8b.ii: Set kPresent to ? HasProperty(O, Pk) — implemented via js_elements.has.
-/// Step 8b.iii.1: Set accumulator to ? Get(O, Pk) — implemented via js_elements.get.
+/// Step 8b.ii: Set kPresent to ? HasProperty(O, Pk) — implemented via elements.has.
+/// Step 8b.iii.1: Set accumulator to ? Get(O, Pk) — implemented via elements.get.
 /// Step 8b.iv: Set k to k ± 1 — implemented by idx + step.
 ///
 /// Returns Ok(#(index, value)) on the first present element found (step 8b.iii),
@@ -3288,9 +3285,9 @@ fn find_present(
     True -> None
     False ->
       // Step 8b.ii: Set kPresent to ? HasProperty(O, Pk)
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         // Step 8b.iii: kPresent is true — set accumulator to Get(O, Pk)
-        True -> Some(#(idx, js_elements.get(elements, idx)))
+        True -> Some(#(idx, elements.get(elements, idx)))
         // Step 8b.iv: Set k to k + 1 (or k - 1 for reduceRight)
         False -> find_present(elements, idx + step, end, step)
       }
@@ -3325,7 +3322,7 @@ fn reduce_loop(
     True -> #(state, Ok(acc))
     False ->
       // Step 9b: Let kPresent be ? HasProperty(O, Pk).
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         // kPresent is false — skip this index (hole).
         // Step 9d: Set k to k + 1 (or k - 1 for reduceRight).
         False ->
@@ -3333,10 +3330,10 @@ fn reduce_loop(
         // Step 9c: If kPresent is true, then
         True -> {
           // Step 9c.i: Let kValue be ? Get(O, Pk).
-          let elem = js_elements.get(elements, idx)
+          let elem = elements.get(elements, idx)
           // Step 9c.ii: Set accumulator to ? Call(callbackfn, undefined, « accumulator, kValue, 𝔽(k), O »).
           // Note: thisArg is always undefined for reduce/reduceRight (no thisArg parameter).
-          use result, state <- frame.try_call(state, cb, JsUndefined, [
+          use result, state <- state.try_call(state, cb, JsUndefined, [
             acc,
             elem,
             js_int(idx),
@@ -3397,13 +3394,7 @@ pub fn array_splice(
   }
   // Step 11: Build the removed array A from [actualStart..actualStart+actualDeleteCount)
   let removed_elements =
-    copy_range(
-      elements,
-      actual_start,
-      0,
-      actual_delete_count,
-      js_elements.new(),
-    )
+    copy_range(elements, actual_start, 0, actual_delete_count, elements.new())
   let #(heap, removed_ref) =
     heap.alloc(
       state.heap,
@@ -3436,7 +3427,7 @@ pub fn array_splice(
       let shift = item_count - actual_delete_count
       // If shift > 0: we need to move elements right. If shift < 0: move left.
       // If shift == 0: no shifting needed.
-      use state <- frame.try_state(splice_shift(
+      use state <- state.try_state(splice_shift(
         state,
         ref,
         actual_start,
@@ -3445,7 +3436,7 @@ pub fn array_splice(
         shift,
       ))
       // Step 15: Insert items at actualStart.
-      use state <- frame.try_state(splice_insert(
+      use state <- state.try_state(splice_insert(
         state,
         ref,
         actual_start,
@@ -3698,12 +3689,12 @@ fn flatten_into_loop(
   case idx >= length {
     True -> #(state, Ok(acc))
     False ->
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         False ->
           // Hole: skip
           flatten_into_loop(state, elements, idx + 1, length, depth, acc)
         True -> {
-          let elem = js_elements.get(elements, idx)
+          let elem = elements.get(elements, idx)
           // If depth > 0 and element is an array, recursively flatten
           case depth > 0 {
             True ->
@@ -3803,10 +3794,10 @@ fn collect_flat(
   case idx >= length {
     True -> acc
     False ->
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         True ->
           collect_flat(elements, idx + 1, length, [
-            js_elements.get(elements, idx),
+            elements.get(elements, idx),
             ..acc
           ])
         False ->
@@ -3976,7 +3967,7 @@ pub fn array_from(
                 state,
               )
             False ->
-              frame.type_error(
+              state.type_error(
                 state,
                 common.typeof_value(mf, state.heap) <> " is not a function",
               )
@@ -3998,7 +3989,7 @@ fn array_from_array_like(
   // Get items as array-like: read length and elements
   case items {
     JsNull | JsUndefined ->
-      frame.type_error(
+      state.type_error(
         state,
         "Cannot create array from " <> common.typeof_value(items, state.heap),
       )
@@ -4040,7 +4031,7 @@ fn array_from_array_like(
           case map_fn {
             None -> {
               // Fast path: copy elements directly
-              let copied = copy_range(elements, 0, 0, length, js_elements.new())
+              let copied = copy_range(elements, 0, 0, length, elements.new())
               let #(heap, new_ref) =
                 heap.alloc(
                   state.heap,
@@ -4116,7 +4107,7 @@ fn array_from_array_like(
               ObjectSlot(
                 kind: ArrayObject(0),
                 properties: dict.new(),
-                elements: js_elements.new(),
+                elements: elements.new(),
                 prototype: Some(array_proto),
                 symbol_properties: dict.new(),
                 extensible: True,
@@ -4133,7 +4124,7 @@ fn array_from_array_like(
           ObjectSlot(
             kind: ArrayObject(0),
             properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(array_proto),
             symbol_properties: dict.new(),
             extensible: True,
@@ -4165,7 +4156,7 @@ fn array_from_mapped_loop(
           ObjectSlot(
             kind: ArrayObject(count),
             properties: dict.new(),
-            elements: js_elements.from_list(vals),
+            elements: elements.from_list(vals),
             prototype: Some(array_proto),
             symbol_properties: dict.new(),
             extensible: True,
@@ -4174,9 +4165,9 @@ fn array_from_mapped_loop(
       #(State(..state, heap:), Ok(JsObject(ref)))
     }
     False -> {
-      let elem = js_elements.get(elements, idx)
+      let elem = elements.get(elements, idx)
       // Call mapFn(element, index)
-      use mapped, state <- frame.try_call(state, map_fn, this_arg, [
+      use mapped, state <- state.try_call(state, map_fn, this_arg, [
         elem,
         js_int(idx),
       ])
@@ -4216,7 +4207,7 @@ pub fn array_of(
       ObjectSlot(
         kind: ArrayObject(count),
         properties: dict.new(),
-        elements: js_elements.from_list(args),
+        elements: elements.from_list(args),
         prototype: Some(array_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -4281,7 +4272,7 @@ pub fn array_to_spliced(
   let new_len = length + item_count - actual_skip_count
   // Steps 10-14: Build the new array
   // Copy [0, actualStart) from source
-  let new_elements = copy_range(elements, 0, 0, actual_start, js_elements.new())
+  let new_elements = copy_range(elements, 0, 0, actual_start, elements.new())
   // Insert items at actualStart
   let new_elements = insert_items(new_elements, actual_start, items)
   // Copy [actualStart + actualSkipCount, length) from source
@@ -4315,7 +4306,7 @@ fn insert_items(
   case items {
     [] -> elements
     [item, ..rest] ->
-      insert_items(js_elements.set(elements, start, item), start + 1, rest)
+      insert_items(elements.set(elements, start, item), start + 1, rest)
   }
 }
 
@@ -4356,7 +4347,7 @@ pub fn array_with(
   }
   // Step 6: bounds check — throw RangeError if out of bounds
   case actual_index < 0 || actual_index >= length {
-    True -> frame.range_error(state, "Invalid index")
+    True -> state.range_error(state, "Invalid index")
     False -> {
       // Get the replacement value
       let replacement = case args {
@@ -4364,9 +4355,8 @@ pub fn array_with(
         _ -> JsUndefined
       }
       // Steps 7-11: Copy all elements, replacing actualIndex with value
-      let new_elements = copy_range(elements, 0, 0, length, js_elements.new())
-      let new_elements =
-        js_elements.set(new_elements, actual_index, replacement)
+      let new_elements = copy_range(elements, 0, 0, length, elements.new())
+      let new_elements = elements.set(new_elements, actual_index, replacement)
       // Step 12: Return A
       let #(heap, ref) =
         heap.alloc(
@@ -4420,7 +4410,7 @@ pub fn array_to_sorted(
           to_sorted_with_comparefn(state, length, elements, comparefn)
         }
         False ->
-          frame.type_error(
+          state.type_error(
             state,
             common.typeof_value(comparefn, state.heap) <> " is not a function",
           )
@@ -4437,11 +4427,11 @@ fn to_sorted_default(
 ) -> #(State, Result(JsValue, JsValue)) {
   let array_proto = state.builtins.array.prototype
   let #(defined, undefs) = collect_sort_elements(elements, length, 0, [], 0)
-  use pairs, state <- frame.try_op(stringify_elements(state, defined, []))
+  use pairs, state <- state.try_op(stringify_elements(state, defined, []))
   let sorted = list.sort(pairs, fn(a, b) { string.compare(a.0, b.0) })
   let sorted_values = list.map(sorted, fn(pair) { pair.1 })
   let all_values = list.append(sorted_values, list.repeat(JsUndefined, undefs))
-  let new_elements = build_elements_from_list(all_values, 0, js_elements.new())
+  let new_elements = build_elements_from_list(all_values, 0, elements.new())
   let #(heap, ref) =
     heap.alloc(
       state.heap,
@@ -4467,11 +4457,11 @@ fn to_sorted_with_comparefn(
 ) -> #(State, Result(JsValue, JsValue)) {
   let array_proto = state.builtins.array.prototype
   let #(defined, undefs) = collect_sort_elements(elements, length, 0, [], 0)
-  use sorted, state <- frame.try_op(
+  use sorted, state <- state.try_op(
     insertion_sort(state, defined, comparefn, []),
   )
   let all_values = list.append(sorted, list.repeat(JsUndefined, undefs))
-  let new_elements = build_elements_from_list(all_values, 0, js_elements.new())
+  let new_elements = build_elements_from_list(all_values, 0, elements.new())
   let #(heap, ref) =
     heap.alloc(
       state.heap,
@@ -4496,7 +4486,7 @@ fn build_elements_from_list(
   case values {
     [] -> acc
     [val, ..rest] ->
-      build_elements_from_list(rest, idx + 1, js_elements.set(acc, idx, val))
+      build_elements_from_list(rest, idx + 1, elements.set(acc, idx, val))
   }
 }
 
@@ -4542,8 +4532,7 @@ pub fn array_to_reversed(
       let all_values = collect_all_elements(elements, length, 0, [])
       // Reverse the collected list.
       let reversed = list.reverse(all_values)
-      let new_elements =
-        build_elements_from_list(reversed, 0, js_elements.new())
+      let new_elements = build_elements_from_list(reversed, 0, elements.new())
       let #(heap, ref) =
         heap.alloc(
           state.heap,
@@ -4573,7 +4562,7 @@ fn collect_all_elements(
     True -> list.reverse(acc)
     False ->
       collect_all_elements(elements, length, idx + 1, [
-        js_elements.get(elements, idx),
+        elements.get(elements, idx),
         ..acc
       ])
   }
@@ -4620,12 +4609,12 @@ fn to_locale_string_loop(
       #(state, Ok(JsString(result)))
     }
     False -> {
-      let elem = js_elements.get(elements, idx)
+      let elem = elements.get(elements, idx)
       case elem {
         JsUndefined | JsNull ->
           to_locale_string_loop(state, elements, idx + 1, length, ["", ..acc])
         _ -> {
-          use s, state <- frame.try_to_string(state, elem)
+          use s, state <- state.try_to_string(state, elem)
           to_locale_string_loop(state, elements, idx + 1, length, [s, ..acc])
         }
       }
@@ -4659,7 +4648,7 @@ fn build_entry_pairs(
   case idx >= length {
     True -> #(h, list.reverse(acc))
     False -> {
-      let val = js_elements.get(elements, idx)
+      let val = elements.get(elements, idx)
       let #(h, pair_ref) =
         common.alloc_array(
           h,

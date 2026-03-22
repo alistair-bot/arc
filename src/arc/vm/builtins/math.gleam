@@ -1,8 +1,8 @@
 import arc/vm/builtins/common
 import arc/vm/builtins/helpers
-import arc/vm/frame.{type State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/state.{type State}
 import arc/vm/value.{
   type JsValue, type MathNativeFn, type Ref, Finite, Infinity, JsNumber,
   JsString, MathAbs, MathAcos, MathAcosh, MathAsin, MathAsinh, MathAtan,
@@ -87,7 +87,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       ObjectSlot(
         kind: OrdinaryObject,
         properties:,
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(object_proto),
         symbol_properties:,
         extensible: True,

@@ -1,4 +1,4 @@
-import arc/vm/array.{type Array}
+import arc/vm/internal/tuple_array.{type Array}
 import arc/vm/opcode.{type Op}
 import gleam/bool
 import gleam/dict.{type Dict}
@@ -922,7 +922,7 @@ pub type PromiseReaction {
   )
 }
 
-/// Saved try-frame for generator suspension (mirrors TryFrame from frame.gleam).
+/// Saved try-frame for generator suspension (mirrors TryFrame from state.gleam).
 pub type SavedTryFrame {
   SavedTryFrame(catch_target: Int, stack_depth: Int)
 }
@@ -957,7 +957,7 @@ pub type HeapSlot {
     symbol_properties: Dict(SymbolId, Property),
     extensible: Bool,
   )
-  /// Flat environment frame. Multiple closures in the same scope reference
+  /// Flat environment state. Multiple closures in the same scope reference
   /// the same EnvSlot, so mutations to captured variables are visible across them.
   /// Compiler flattens the scope chain — no parent pointer, all captures are direct.
   /// Mutable captures stored as JsObject(box_ref) pointing to a BoxSlot.
@@ -1166,7 +1166,7 @@ pub fn refs_in_slot(slot: HeapSlot) -> List(Ref) {
         |> list.flat_map(refs_in_property)
       let elem_refs = case elements {
         DenseElements(data) ->
-          array.to_list(data) |> list.flat_map(refs_in_value)
+          tuple_array.to_list(data) |> list.flat_map(refs_in_value)
         SparseElements(data) ->
           dict.values(data) |> list.flat_map(refs_in_value)
       }
@@ -1294,7 +1294,7 @@ pub fn refs_in_slot(slot: HeapSlot) -> List(Ref) {
         })
       list.flatten([
         [env_ref],
-        array.to_list(saved_locals) |> list.flat_map(refs_in_value),
+        tuple_array.to_list(saved_locals) |> list.flat_map(refs_in_value),
         list.flat_map(saved_stack, refs_in_value),
         finally_refs,
         refs_in_value(saved_this),
@@ -1326,7 +1326,7 @@ pub fn refs_in_slot(slot: HeapSlot) -> List(Ref) {
         refs_in_value(resolve),
         refs_in_value(reject),
         [env_ref],
-        array.to_list(saved_locals) |> list.flat_map(refs_in_value),
+        tuple_array.to_list(saved_locals) |> list.flat_map(refs_in_value),
         list.flat_map(saved_stack, refs_in_value),
         finally_refs,
         refs_in_value(saved_this),

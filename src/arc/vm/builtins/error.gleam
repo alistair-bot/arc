@@ -1,8 +1,8 @@
 import arc/vm/builtins/common.{type BuiltinType}
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/ops/object
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type ErrorNativeFn, type JsValue, type Ref, Dispatch, ErrorConstructor,
   ErrorNative, JsNull, JsObject, JsString, JsUndefined, ObjectSlot,
@@ -180,7 +180,7 @@ pub fn call_native(
         dict.from_list([#("message", value.builtin_property(JsString(msg)))]),
       )
     [other, ..] -> {
-      use msg, state <- frame.try_to_string(state, other)
+      use msg, state <- state.try_to_string(state, other)
       alloc_error(
         state,
         proto,
@@ -201,7 +201,7 @@ fn alloc_error(
       ObjectSlot(
         kind: OrdinaryObject,
         properties: props,
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -230,10 +230,10 @@ fn error_to_string(
 ) -> #(State, Result(JsValue, JsValue)) {
   case this {
     JsNull | JsUndefined ->
-      frame.type_error(state, "Error.prototype.toString called on non-object")
+      state.type_error(state, "Error.prototype.toString called on non-object")
     JsObject(ref) -> {
       // Step 3: Let name be ? Get(O, "name").
-      use name_val, state <- frame.try_op(object.get_value(
+      use name_val, state <- state.try_op(object.get_value(
         state,
         ref,
         "name",
@@ -243,14 +243,14 @@ fn error_to_string(
       case name_val {
         JsUndefined -> error_to_string_msg(state, ref, this, "Error")
         _ -> {
-          use name, state <- frame.try_to_string(state, name_val)
+          use name, state <- state.try_to_string(state, name_val)
           error_to_string_msg(state, ref, this, name)
         }
       }
     }
     // Step 2: Non-object this → TypeError.
     _ ->
-      frame.type_error(state, "Error.prototype.toString called on non-object")
+      state.type_error(state, "Error.prototype.toString called on non-object")
   }
 }
 
@@ -262,7 +262,7 @@ fn error_to_string_msg(
   name: String,
 ) -> #(State, Result(JsValue, JsValue)) {
   // Step 6: Let msg be ? Get(O, "message").
-  use msg_val, state <- frame.try_op(object.get_value(
+  use msg_val, state <- state.try_op(object.get_value(
     state,
     ref,
     "message",
@@ -272,7 +272,7 @@ fn error_to_string_msg(
   case msg_val {
     JsUndefined -> error_to_string_combine(state, name, "")
     _ -> {
-      use msg, state <- frame.try_to_string(state, msg_val)
+      use msg, state <- state.try_to_string(state, msg_val)
       error_to_string_combine(state, name, msg)
     }
   }

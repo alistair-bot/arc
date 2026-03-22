@@ -5,9 +5,9 @@
 /// Uses Erlang's `re` module (PCRE) via FFI for actual matching.
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type Ref, type RegExpNativeFn, AccessorProperty, DataProperty,
   Dispatch, Finite, JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined,
@@ -308,7 +308,7 @@ pub fn alloc_regexp(
           ),
         ),
       ]),
-      elements: js_elements.new(),
+      elements: elements.new(),
       prototype: Some(regexp_proto),
       symbol_properties: dict.new(),
       extensible: True,
@@ -339,7 +339,7 @@ fn not_regexp(
   state: State,
   method: String,
 ) -> #(State, Result(JsValue, JsValue)) {
-  frame.type_error(
+  state.type_error(
     state,
     "RegExp.prototype." <> method <> " requires that 'this' be a RegExp",
   )
@@ -350,7 +350,7 @@ fn not_regexp(
 fn string_arg(state: State, args: List(JsValue)) -> String {
   case args {
     [arg, ..] ->
-      case frame.to_string(state, arg) {
+      case state.to_string(state, arg) {
         Ok(#(s, _)) -> s
         Error(_) -> "undefined"
       }
@@ -752,13 +752,13 @@ fn apply_replacements(
               match.captures,
               [JsNumber(Finite(int.to_float(match.position))), JsString(str)],
             ])
-          use result, state <- frame.try_call(
+          use result, state <- state.try_call(
             state,
             replace_value,
             JsUndefined,
             call_args,
           )
-          use replacement, state <- frame.try_to_string(state, result)
+          use replacement, state <- state.try_to_string(state, result)
           let acc = acc <> replacement
           let prev_end = match.position + string.length(match.matched)
           apply_replacements(
@@ -772,7 +772,7 @@ fn apply_replacements(
           )
         }
         False -> {
-          use template, state <- frame.try_to_string(state, replace_value)
+          use template, state <- state.try_to_string(state, replace_value)
           case
             get_substitution(
               match.matched,

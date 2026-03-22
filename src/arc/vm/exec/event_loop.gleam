@@ -2,17 +2,17 @@
 // Promise job queue draining + handler execution
 // ============================================================================
 
-import arc/vm/array
 import arc/vm/builtins/arc as builtins_arc
 import arc/vm/builtins/common
 import arc/vm/builtins/promise as builtins_promise
-import arc/vm/coerce
 import arc/vm/completion.{NormalCompletion, ThrowCompletion, YieldCompletion}
-import arc/vm/frame.{
+import arc/vm/heap
+import arc/vm/internal/tuple_array
+import arc/vm/ops/coerce
+import arc/vm/ops/object
+import arc/vm/state.{
   type State, type StepResult, type VmError, State, StepVmError, Thrown,
 }
-import arc/vm/heap
-import arc/vm/object
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, FunctionObject, JsNull, JsObject,
   JsUndefined, NativeFunction, ObjectSlot,
@@ -169,10 +169,10 @@ fn execute_job(state: State, job: value.Job) -> State {
   }
 }
 
-/// Helper: Call a function via frame.call during job execution (fire-and-forget).
+/// Helper: Call a function via state.call during job execution (fire-and-forget).
 /// Used for calling resolve/reject on child promises after a handler runs.
 fn call_for_job(state: State, target: JsValue, args: List(JsValue)) -> State {
-  case frame.call(state, target, JsUndefined, args) {
+  case state.call(state, target, JsUndefined, args) {
     Ok(#(_, new_state)) -> new_state
     Error(#(_, new_state)) -> new_state
   }
@@ -200,7 +200,7 @@ fn execute_reaction_job(
     }
     True -> {
       // Call handler(arg)
-      let result = frame.call(state, handler, JsUndefined, [arg])
+      let result = state.call(state, handler, JsUndefined, [arg])
       case result {
         Ok(#(return_val, new_state)) ->
           // Resolve child with handler's return value
@@ -221,7 +221,7 @@ fn execute_thenable_job(
   resolve: JsValue,
   reject: JsValue,
 ) -> State {
-  let result = frame.call(state, then_fn, thenable, [resolve, reject])
+  let result = state.call(state, then_fn, thenable, [resolve, reject])
   case result {
     Ok(#(_return_val, new_state)) -> new_state
     Error(#(thrown, new_state)) ->
@@ -264,7 +264,7 @@ pub fn run_handler_with_this(
               ..state,
               stack: [],
               pc: 0,
-              code: array.from_list([]),
+              code: tuple_array.from_list([]),
               call_stack: [],
               try_stack: [],
             )
@@ -272,7 +272,7 @@ pub fn run_handler_with_this(
             Ok(new_state) -> {
               let merged =
                 State(
-                  ..frame.merge_globals(state, new_state, []),
+                  ..state.merge_globals(state, new_state, []),
                   heap: new_state.heap,
                 )
               case new_state.stack {
@@ -317,7 +317,7 @@ fn run_closure_for_job(
       padded_args,
       list.repeat(JsUndefined, remaining),
     ])
-    |> array.from_list
+    |> tuple_array.from_list
   let #(heap, new_this) = bind_this(state, callee_template, this_val)
   let job_state =
     State(
@@ -338,11 +338,11 @@ fn run_closure_for_job(
     )
   case execute_inner(job_state) {
     Ok(#(NormalCompletion(val, h), final_state)) ->
-      Ok(#(val, State(..frame.merge_globals(state, final_state, []), heap: h)))
+      Ok(#(val, State(..state.merge_globals(state, final_state, []), heap: h)))
     Ok(#(ThrowCompletion(thrown, h), final_state)) ->
       Error(#(
         thrown,
-        State(..frame.merge_globals(state, final_state, []), heap: h),
+        State(..state.merge_globals(state, final_state, []), heap: h),
       ))
     Ok(#(YieldCompletion(_, _), _)) ->
       panic as "YieldCompletion should not appear in job execution"

@@ -1,7 +1,7 @@
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
 import arc/vm/opcode
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsElements, type JsValue, type Property, type Ref, type SymbolId,
   AccessorProperty, ArrayObject, DataProperty, Finite, FunctionObject,
@@ -102,7 +102,7 @@ pub fn get_value(
     Some(DataProperty(value: val, ..)) -> Ok(#(val, state))
     // Steps 5-7: IsAccessorDescriptor → Call(getter, Receiver) or undefined.
     Some(AccessorProperty(get: Some(getter), ..)) ->
-      frame.call(state, getter, receiver, [])
+      state.call(state, getter, receiver, [])
     Some(AccessorProperty(get: None, ..)) -> Ok(#(value.JsUndefined, state))
     // Step 2: desc is undefined — walk prototype chain.
     None ->
@@ -198,9 +198,9 @@ pub fn get_own_property(heap: Heap, ref: Ref, key: String) -> Option(Property) {
               case int.parse(key) {
                 // Array index property from elements storage
                 Ok(idx) if idx >= 0 ->
-                  case js_elements.has(elements, idx) {
+                  case elements.has(elements, idx) {
                     True ->
-                      Some(value.data_property(js_elements.get(elements, idx)))
+                      Some(value.data_property(elements.get(elements, idx)))
                     False -> dict_get_option(properties, key)
                   }
                 // Non-index key → OrdinaryGetOwnProperty (§10.1.5.1)
@@ -211,7 +211,7 @@ pub fn get_own_property(heap: Heap, ref: Ref, key: String) -> Option(Property) {
         value.ArgumentsObject(_) ->
           case int.parse(key) {
             Ok(idx) if idx >= 0 ->
-              case js_elements.get_option(elements, idx) {
+              case elements.get_option(elements, idx) {
                 Some(val) -> Some(value.data_property(val))
                 None -> dict_get_option(properties, key)
               }
@@ -308,7 +308,7 @@ pub fn set_value(
     // §10.1.9.2 step 3.c: Perform ? Call(setter, Receiver, « V »).
     // §10.1.9.2 step 3.d: Return true.
     Some(AccessorProperty(set: Some(setter), ..)) -> {
-      use #(_, state) <- result.map(frame.call(state, setter, receiver, [val]))
+      use #(_, state) <- result.map(state.call(state, setter, receiver, [val]))
       #(state, True)
     }
   }
@@ -392,7 +392,7 @@ pub fn set_property(
                     True -> #(h, False)
                     False -> {
                       // §10.4.2.1 step 2.c-d: Set element, update length to max(oldLen, index+1).
-                      let new_elements = js_elements.set(elements, idx, val)
+                      let new_elements = elements.set(elements, idx, val)
                       let new_length = int.max(length, idx + 1)
                       #(
                         heap.write(
@@ -417,7 +417,7 @@ pub fn set_property(
         value.ArgumentsObject(_) ->
           case int.parse(key) {
             Ok(idx) if idx >= 0 ->
-              case !extensible && !js_elements.has(elements, idx) {
+              case !extensible && !elements.has(elements, idx) {
                 True -> #(h, False)
                 False -> #(
                   heap.write(
@@ -425,7 +425,7 @@ pub fn set_property(
                     ref,
                     ObjectSlot(
                       ..slot,
-                      elements: js_elements.set(elements, idx, val),
+                      elements: elements.set(elements, idx, val),
                     ),
                   ),
                   True,
@@ -546,7 +546,7 @@ fn truncate_elements(
   new_len: Int,
   _idx: Int,
 ) -> JsElements {
-  js_elements.truncate(elements, new_len)
+  elements.truncate(elements, new_len)
 }
 
 /// §10.1.6.1 OrdinaryDefineOwnProperty / §10.1.6.3 ValidateAndApplyPropertyDescriptor
@@ -788,16 +788,13 @@ pub fn delete_property(h: Heap, ref: Ref, key: String) -> #(Heap, Bool) {
           case int.parse(key) {
             Ok(idx) ->
               // Step 1-2: Check if element exists; if not, return true.
-              case js_elements.has(elements, idx) {
+              case elements.has(elements, idx) {
                 // Step 3: Element exists (implicitly configurable) — remove and return true.
                 True -> #(
                   heap.write(
                     h,
                     ref,
-                    ObjectSlot(
-                      ..slot,
-                      elements: js_elements.delete(elements, idx),
-                    ),
+                    ObjectSlot(..slot, elements: elements.delete(elements, idx)),
                   ),
                   True,
                 )
@@ -936,7 +933,7 @@ fn collect_element_keys(
     True -> #(acc, seen)
     False -> {
       let key = int.to_string(idx)
-      case js_elements.has(elements, idx) && !set.contains(seen, key) {
+      case elements.has(elements, idx) && !set.contains(seen, key) {
         True ->
           collect_element_keys(
             elements,
@@ -1086,7 +1083,7 @@ fn copy_element_range(
   case idx >= end {
     True -> heap
     False ->
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         True -> {
           // Step 4.c.ii.2: CreateDataPropertyOrThrow(target, ToString(idx), value).
           let h =
@@ -1094,7 +1091,7 @@ fn copy_element_range(
               heap,
               target_ref,
               int.to_string(idx),
-              js_elements.get(elements, idx),
+              elements.get(elements, idx),
             )
           copy_element_range(h, target_ref, elements, idx + 1, end)
         }
@@ -1135,7 +1132,7 @@ pub fn get_symbol_value(
         Ok(DataProperty(value: val, ..)) -> Ok(#(val, state))
         // Step 5-7: Accessor with getter → Call(getter, Receiver).
         Ok(AccessorProperty(get: Some(getter), ..)) ->
-          frame.call(state, getter, receiver, [])
+          state.call(state, getter, receiver, [])
         // Step 6: getter is undefined → return undefined.
         Ok(AccessorProperty(get: None, ..)) -> Ok(#(value.JsUndefined, state))
         // Step 2: desc is undefined → walk prototype chain.
@@ -1232,7 +1229,7 @@ pub fn set_symbol_value(
         // Step 6-7: Accessor with setter → Call(setter, Receiver, << V >>), return true.
         Ok(AccessorProperty(set: Some(setter), ..)) -> {
           use #(_, state) <- result.map(
-            frame.call(state, setter, receiver, [val]),
+            state.call(state, setter, receiver, [val]),
           )
           #(state, True)
         }
@@ -1405,7 +1402,7 @@ fn inspect_array_loop(
     True -> list.reverse(acc)
     False -> {
       let item =
-        js_elements.get_option(elements, idx)
+        elements.get_option(elements, idx)
         |> option.map(inspect_inner(_, heap, depth + 1, visited))
         |> option.unwrap("<empty>")
       inspect_array_loop(heap, elements, idx + 1, length, depth, visited, [

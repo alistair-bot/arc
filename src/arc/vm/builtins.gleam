@@ -18,7 +18,7 @@ import arc/vm/builtins/symbol as builtins_symbol
 import arc/vm/builtins/weak_map as builtins_weak_map
 import arc/vm/builtins/weak_set as builtins_weak_set
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
 import arc/vm/value.{JsObject, JsUndefined, ObjectSlot, OrdinaryObject}
 import gleam/dict
 import gleam/list
@@ -89,7 +89,7 @@ pub fn init(h: Heap) -> #(Heap, Builtins) {
             value.builtin_property(JsObject(iterator_symbol_iterator)),
           ),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(object_proto),
         extensible: True,
       ),
@@ -297,7 +297,7 @@ pub fn globals(b: Builtins, h: Heap) -> #(Heap, value.Ref) {
         kind: OrdinaryObject,
         properties:,
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(b.object.prototype),
         extensible: True,
       ),

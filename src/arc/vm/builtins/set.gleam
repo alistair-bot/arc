@@ -6,12 +6,12 @@
 /// Stores values in a Dict(MapKey, JsValue) + List(MapKey) for insertion order.
 /// The dict maps normalized MapKey → original JsValue.
 /// The keys list preserves insertion order for forEach.
-import arc/vm/array as vm_array
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers.{first_arg}
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/internal/tuple_array as vm_array
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type MapKey, type Ref, type SetNativeFn, AccessorProperty,
   ArrayObject, Dispatch, Finite, JsBool, JsNull, JsNumber, JsObject, JsUndefined,
@@ -163,7 +163,7 @@ fn construct(
       ObjectSlot(
         kind: SetObject(data:, keys:),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(set_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -300,7 +300,7 @@ fn set_for_each(
   }
   case helpers.is_callable(state.heap, callback) {
     False ->
-      frame.type_error(
+      state.type_error(
         state,
         "Set.prototype.forEach callback is not a function",
       )
@@ -325,7 +325,7 @@ fn for_each_loop(
   case entries {
     [] -> #(state, Ok(JsUndefined))
     [#(_key, val), ..rest] ->
-      case frame.call(state, callback, this_arg, [val, val, set_this]) {
+      case state.call(state, callback, this_arg, [val, val, set_this]) {
         Ok(#(_result, new_state)) ->
           for_each_loop(new_state, rest, callback, this_arg, set_this)
         Error(#(thrown, new_state)) -> #(new_state, Error(thrown))
@@ -527,7 +527,7 @@ fn set_values(this: JsValue, state: State) -> #(State, Result(JsValue, JsValue))
       ObjectSlot(
         kind: ArrayObject(list.length(values)),
         properties: dict.new(),
-        elements: js_elements.from_list(values),
+        elements: elements.from_list(values),
         prototype: None,
         symbol_properties: dict.new(),
         extensible: True,
@@ -554,7 +554,7 @@ fn set_entries(
               ObjectSlot(
                 kind: ArrayObject(2),
                 properties: dict.new(),
-                elements: js_elements.from_list([v, v]),
+                elements: elements.from_list([v, v]),
                 prototype: None,
                 symbol_properties: dict.new(),
                 extensible: True,
@@ -571,7 +571,7 @@ fn set_entries(
       ObjectSlot(
         kind: ArrayObject(list.length(entries)),
         properties: dict.new(),
-        elements: js_elements.from_list(list.reverse(entries)),
+        elements: elements.from_list(list.reverse(entries)),
         prototype: None,
         symbol_properties: dict.new(),
         extensible: True,
@@ -592,7 +592,7 @@ fn alloc_new_set(
       ObjectSlot(
         kind: SetObject(data:, keys:),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: None,
         symbol_properties: dict.new(),
         extensible: True,
@@ -615,9 +615,9 @@ fn require_set_like(
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: SetObject(data:, keys:), ..)) ->
           Ok(#(data, keys, state))
-        _ -> Error(frame.type_error(state, "The .has method is not callable"))
+        _ -> Error(state.type_error(state, "The .has method is not callable"))
       }
-    _ -> Error(frame.type_error(state, "The .has method is not callable"))
+    _ -> Error(state.type_error(state, "The .has method is not callable"))
   }
 }
 
@@ -637,8 +637,8 @@ fn require_set(
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: SetObject(data:, keys:), ..)) ->
           cont(data, keys, ref, state)
-        _ -> frame.type_error(state, err)
+        _ -> state.type_error(state, err)
       }
-    _ -> frame.type_error(state, err)
+    _ -> state.type_error(state, err)
   }
 }

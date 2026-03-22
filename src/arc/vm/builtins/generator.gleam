@@ -5,7 +5,7 @@
 /// Generator.prototype provides the iteration methods.
 import arc/vm/builtins/common.{type GeneratorBuiltin, GeneratorBuiltin}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
 import arc/vm/value.{
   type Ref, GeneratorNext, GeneratorReturn, GeneratorThrow, ObjectSlot,
 }
@@ -42,7 +42,7 @@ pub fn init(
         kind: value.OrdinaryObject,
         properties: dict.from_list(methods),
         symbol_properties:,
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(iterator_proto),
         extensible: True,
       ),

@@ -1,10 +1,10 @@
-import arc/vm/frame.{
+import arc/vm/exec/generators
+import arc/vm/heap.{type Heap}
+import arc/vm/internal/elements
+import arc/vm/ops/object
+import arc/vm/state.{
   type State, type StepResult, type VmError, State, StepVmError, Unimplemented,
 }
-import arc/vm/generators
-import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
 import arc/vm/value.{
   type JsValue, type Ref, ArrayObject, DataProperty, GeneratorObject, JsBool,
   JsObject, JsUndefined, ObjectSlot,
@@ -72,7 +72,7 @@ pub fn grow_array_length(h: Heap, ref: Ref) -> Heap {
     ObjectSlot(kind: ArrayObject(length:), elements:, ..) -> {
       // Force sparse representation so the hole survives later appends.
       let elements = case elements {
-        value.DenseElements(_) -> js_elements.delete(elements, length)
+        value.DenseElements(_) -> elements.delete(elements, length)
         value.SparseElements(_) -> elements
       }
       ObjectSlot(..slot, kind: ArrayObject(length + 1), elements:)
@@ -91,7 +91,7 @@ pub fn push_onto_array(h: Heap, ref: Ref, val: JsValue) -> Heap {
       ObjectSlot(
         ..slot,
         kind: ArrayObject(length + 1),
-        elements: js_elements.set(elements, length, val),
+        elements: elements.set(elements, length, val),
       )
     _ -> slot
   }
@@ -110,9 +110,9 @@ pub fn append_range_to_array(
   case idx >= end {
     True -> h
     False -> {
-      // js_elements.get returns JsUndefined for holes — matches the spec's
+      // elements.get returns JsUndefined for holes — matches the spec's
       // array iterator behavior (CreateIterResultObject(Get(array, idx), false)).
-      let h = push_onto_array(h, target_ref, js_elements.get(src_elements, idx))
+      let h = push_onto_array(h, target_ref, elements.get(src_elements, idx))
       append_range_to_array(h, target_ref, src_elements, idx + 1, end)
     }
   }
@@ -129,7 +129,7 @@ pub fn append_range_to_array(
 ///
 /// Array fast-path is observationally equivalent for us — the spec's array
 /// iterator reads Get(array, idx) which returns undefined for holes; so does
-/// js_elements.get. V8 does the same shortcut.
+/// elements.get. V8 does the same shortcut.
 pub fn spread_into_array(
   state: State,
   target_ref: Ref,
@@ -157,7 +157,7 @@ pub fn spread_into_array(
             unwind_to_catch,
           )
         _ -> {
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             object.inspect(iterable, state.heap) <> " is not iterable",
           )
@@ -167,7 +167,7 @@ pub fn spread_into_array(
     // (Strings are iterable per spec but GetIterator doesn't handle them yet;
     //  will be fixed when Symbol.iterator is wired for string wrappers.)
     _ -> {
-      frame.throw_type_error(
+      state.throw_type_error(
         state,
         object.inspect(iterable, state.heap) <> " is not iterable",
       )
@@ -211,7 +211,7 @@ pub fn drain_generator_to_array(
               // (ArraySpread handler) sets the stack explicitly.
               Ok(
                 State(
-                  ..frame.merge_globals(state, next_state, []),
+                  ..state.merge_globals(state, next_state, []),
                   heap: next_state.heap,
                 ),
               )
@@ -223,7 +223,7 @@ pub fn drain_generator_to_array(
               let heap = push_onto_array(next_state.heap, target_ref, val)
               // Recurse with the post-next state but cleaned stack.
               drain_generator_to_array(
-                State(..frame.merge_globals(state, next_state, []), heap:),
+                State(..state.merge_globals(state, next_state, []), heap:),
                 gen_ref,
                 target_ref,
                 execute_inner,

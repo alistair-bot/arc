@@ -1,10 +1,10 @@
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/builtins/promise as builtins_promise
-import arc/vm/coerce
-import arc/vm/frame.{type State, type StepResult, State, Thrown}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/ops/coerce
+import arc/vm/ops/object
+import arc/vm/state.{type State, type StepResult, State, Thrown}
 import arc/vm/value.{
   type JsValue, type Ref, ArrayObject, Finite, JsBool, JsNumber, JsObject,
   JsString, JsUndefined, NativeFunction, ObjectSlot, OrdinaryObject,
@@ -74,7 +74,7 @@ pub fn call_native_promise_constructor(
   // Verify executor is callable
   case coerce.is_callable_value(state.heap, executor) {
     False -> {
-      frame.throw_type_error(state, "Promise resolver is not a function")
+      state.throw_type_error(state, "Promise resolver is not a function")
     }
     True -> {
       let #(h, promise_ref, data_ref, resolve_fn, reject_fn) =
@@ -82,7 +82,7 @@ pub fn call_native_promise_constructor(
       // Run executor inline — its return value is discarded, the promise is the result.
       let new_state = State(..state, heap: h, stack: rest_stack)
       case
-        frame.call(new_state, executor, JsUndefined, [
+        state.call(new_state, executor, JsUndefined, [
           resolve_fn,
           reject_fn,
         ])
@@ -305,7 +305,7 @@ pub fn call_native_promise_then(
       )
     }
     None -> {
-      frame.throw_type_error(state, "then called on non-promise")
+      state.throw_type_error(state, "then called on non-promise")
     }
   }
 }
@@ -343,7 +343,7 @@ pub fn call_native_promise_finally(
               value.Call(value.PromiseFinallyFulfill(on_finally:)),
             ),
             properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -358,7 +358,7 @@ pub fn call_native_promise_finally(
               value.Call(value.PromiseFinallyReject(on_finally:)),
             ),
             properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -387,7 +387,7 @@ pub fn call_native_finally_fulfill(
     [] -> JsUndefined
   }
   // Call onFinally() with no arguments
-  let result = frame.call(state, on_finally, JsUndefined, [])
+  let result = state.call(state, on_finally, JsUndefined, [])
   case result {
     Ok(#(finally_result, new_state)) ->
       // Create Promise.resolve(finally_result).then(value_thunk)
@@ -411,7 +411,7 @@ pub fn call_native_finally_reject(
     [] -> JsUndefined
   }
   // Call onFinally() with no arguments
-  let result = frame.call(state, on_finally, JsUndefined, [])
+  let result = state.call(state, on_finally, JsUndefined, [])
   case result {
     Ok(#(finally_result, new_state)) ->
       // Create Promise.resolve(finally_result).then(thrower)
@@ -451,7 +451,7 @@ fn finally_chain_value(
           value.Call(value.PromiseFinallyValueThunk(value: captured_value)),
         ),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(state.builtins.function.prototype),
         symbol_properties: dict.new(),
         extensible: True,
@@ -490,7 +490,7 @@ fn finally_chain_throw(
           value.Call(value.PromiseFinallyThrower(reason: captured_reason)),
         ),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(state.builtins.function.prototype),
         symbol_properties: dict.new(),
         extensible: True,
@@ -735,7 +735,7 @@ fn promise_all_loop(
               #("name", common.fn_name_property("")),
               #("length", common.fn_length_property(1)),
             ]),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -941,7 +941,7 @@ fn promise_all_settled_loop(
               #("name", common.fn_name_property("")),
               #("length", common.fn_length_property(1)),
             ]),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -965,7 +965,7 @@ fn promise_all_settled_loop(
               #("name", common.fn_name_property("")),
               #("length", common.fn_length_property(1)),
             ]),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -1118,7 +1118,7 @@ fn promise_any_loop(
               #("name", common.fn_name_property("")),
               #("length", common.fn_length_property(1)),
             ]),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -1462,7 +1462,7 @@ fn promise_combinator_decrement_and_maybe_resolve(
           // All elements resolved — call resolve(values)
           let state = State(..state, heap: h)
           case
-            frame.call(state, resolve, JsUndefined, [
+            state.call(state, resolve, JsUndefined, [
               JsObject(values_ref),
             ])
           {
@@ -1505,7 +1505,7 @@ fn promise_any_decrement_and_maybe_reject(
               "All promises were rejected",
             )
           let state = State(..state, heap: h)
-          case frame.call(state, reject, JsUndefined, [err]) {
+          case state.call(state, reject, JsUndefined, [err]) {
             Ok(#(_, after_state)) -> after_state
             Error(#(_, after_state)) -> after_state
           }
@@ -1529,7 +1529,7 @@ pub fn set_array_element(
     ObjectSlot(kind: ArrayObject(length:), elements:, ..) ->
       ObjectSlot(
         ..slot,
-        elements: js_elements.set(elements, index, val),
+        elements: elements.set(elements, index, val),
         kind: ArrayObject(int.max(length, index + 1)),
       )
     _ -> slot
@@ -1553,7 +1553,7 @@ pub fn make_aggregate_error(
           #("message", value.builtin_property(JsString(message))),
           #("errors", value.builtin_property(JsObject(errors_arr_ref))),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(b.aggregate_error.prototype),
         symbol_properties: dict.new(),
         extensible: True,
@@ -1586,7 +1586,7 @@ fn call_native_for_job(
   target: JsValue,
   args: List(JsValue),
 ) -> State {
-  case frame.call(state, target, JsUndefined, args) {
+  case state.call(state, target, JsUndefined, args) {
     Ok(#(_, new_state)) -> new_state
     Error(#(_, new_state)) -> new_state
   }
@@ -1608,7 +1608,7 @@ fn extract_elements_loop(
   case idx >= length {
     True -> list.reverse(acc)
     False -> {
-      let val = js_elements.get(elements, idx)
+      let val = elements.get(elements, idx)
       extract_elements_loop(elements, idx + 1, length, [val, ..acc])
     }
   }

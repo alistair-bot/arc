@@ -1,4 +1,3 @@
-import arc/vm/array
 import arc/vm/builtins/arc as builtins_arc
 import arc/vm/builtins/array as builtins_array
 import arc/vm/builtins/boolean as builtins_boolean
@@ -16,21 +15,22 @@ import arc/vm/builtins/string as builtins_string
 import arc/vm/builtins/symbol as builtins_symbol
 import arc/vm/builtins/weak_map as builtins_weak_map
 import arc/vm/builtins/weak_set as builtins_weak_set
-import arc/vm/coerce
 import arc/vm/completion.{
   type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
 }
-import arc/vm/frame.{
+import arc/vm/exec/generators
+import arc/vm/exec/promises
+import arc/vm/heap.{type Heap}
+import arc/vm/internal/elements
+import arc/vm/internal/tuple_array
+import arc/vm/ops/coerce
+import arc/vm/ops/object
+import arc/vm/ops/operators
+import arc/vm/realm
+import arc/vm/state.{
   type State, type StepResult, type VmError, SavedFrame, State, StepVmError,
   Thrown, Unimplemented,
 }
-import arc/vm/generators
-import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
-import arc/vm/operators
-import arc/vm/promises
-import arc/vm/realm
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, AsyncFunctionSlot, DataProperty,
   FunctionObject, GeneratorObject, GeneratorSlot, JsNull, JsObject, JsString,
@@ -168,7 +168,7 @@ fn call_regular_function(
   new_callee_ref: option.Option(Ref),
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   use <- bool.lazy_guard(state.call_depth >= max_call_depth, fn() {
-    frame.throw_range_error(state, "Maximum call stack size exceeded")
+    state.throw_range_error(state, "Maximum call stack size exceeded")
   })
   // Save caller frame
   let saved =
@@ -273,7 +273,7 @@ fn call_generator_function(
           ObjectSlot(
             kind: GeneratorObject(generator_data: data_ref),
             properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.generator.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -282,7 +282,7 @@ fn call_generator_function(
       // Return to caller with the generator object on the stack
       Ok(
         State(
-          ..frame.merge_globals(state, suspended, []),
+          ..state.merge_globals(state, suspended, []),
           heap: h,
           stack: [JsObject(gen_obj_ref), ..rest_stack],
           pc: state.pc + 1,
@@ -300,7 +300,7 @@ fn call_generator_function(
             func_template: callee_template,
             env_ref:,
             saved_pc: 0,
-            saved_locals: array.from_list([]),
+            saved_locals: tuple_array.from_list([]),
             saved_stack: [],
             saved_try_stack: [],
             saved_finally_stack: [],
@@ -314,7 +314,7 @@ fn call_generator_function(
           ObjectSlot(
             kind: GeneratorObject(generator_data: data_ref),
             properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.generator.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -405,7 +405,7 @@ fn call_async_function(
         )
       let state =
         async_setup_await(
-          State(..frame.merge_globals(state, suspended, []), heap: h2),
+          State(..state.merge_globals(state, suspended, []), heap: h2),
           async_data_ref,
           awaited_value,
         )
@@ -423,7 +423,7 @@ fn call_async_function(
         builtins_promise.fulfill_promise(h2, data_ref, return_value)
       Ok(
         State(
-          ..frame.merge_globals(state, final_state, jobs),
+          ..state.merge_globals(state, final_state, jobs),
           heap: h2,
           stack: [JsObject(promise_ref), ..rest_stack],
           pc: state.pc + 1,
@@ -434,7 +434,7 @@ fn call_async_function(
       // Async function threw without awaiting -- reject the promise
       let state =
         builtins_promise.reject_promise(
-          State(..frame.merge_globals(state, final_state, []), heap: h2),
+          State(..state.merge_globals(state, final_state, []), heap: h2),
           data_ref,
           thrown,
         )
@@ -482,7 +482,7 @@ fn async_setup_await(
           value.Call(value.AsyncResume(async_data_ref:, is_reject: False)),
         ),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(builtins.function.prototype),
         symbol_properties: dict.new(),
         extensible: True,
@@ -496,7 +496,7 @@ fn async_setup_await(
           value.Call(value.AsyncResume(async_data_ref:, is_reject: True)),
         ),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(builtins.function.prototype),
         symbol_properties: dict.new(),
         extensible: True,
@@ -595,7 +595,7 @@ pub fn call_native_async_resume(
             builtins_promise.fulfill_promise(h2, promise_data_ref, return_value)
           Ok(
             State(
-              ..frame.merge_globals(state, final_state, jobs),
+              ..state.merge_globals(state, final_state, jobs),
               heap: h2,
               stack: [JsUndefined, ..rest_stack],
               pc: state.pc + 1,
@@ -606,7 +606,7 @@ pub fn call_native_async_resume(
           // Async function threw -- reject the outer promise
           let state =
             builtins_promise.reject_promise(
-              State(..frame.merge_globals(state, final_state, []), heap: h2),
+              State(..state.merge_globals(state, final_state, []), heap: h2),
               promise_data_ref,
               thrown,
             )
@@ -639,7 +639,7 @@ pub fn call_native_async_resume(
             )
           let state =
             async_setup_await(
-              State(..frame.merge_globals(state, suspended, []), heap: h2),
+              State(..state.merge_globals(state, suspended, []), heap: h2),
               async_data_ref,
               awaited_value,
             )
@@ -668,7 +668,7 @@ pub fn setup_locals(
   env_ref: value.Ref,
   callee_template: FuncTemplate,
   args: List(JsValue),
-) -> array.Array(JsValue) {
+) -> tuple_array.Array(JsValue) {
   let env_values = heap.read_env(h, env_ref) |> option.unwrap([])
   let env_count = list.length(env_values)
   let padded_args = pad_args(args, callee_template.arity)
@@ -679,7 +679,7 @@ pub fn setup_locals(
     padded_args,
     list.repeat(JsUndefined, remaining),
   ])
-  |> array.from_list
+  |> tuple_array.from_list
 }
 
 /// Call a native (Gleam-implemented) function. Most natives execute synchronously
@@ -767,7 +767,7 @@ pub fn call_native(
                 properties: dict.from_list([
                   #("name", common.fn_name_property(name)),
                 ]),
-                elements: js_elements.new(),
+                elements: elements.new(),
                 prototype: Some(state.builtins.function.prototype),
                 symbol_properties: dict.new(),
                 extensible: True,
@@ -783,7 +783,7 @@ pub fn call_native(
           )
         }
         _ -> {
-          frame.throw_type_error(state, "Bind must be called on a function")
+          state.throw_type_error(state, "Bind must be called on a function")
         }
       }
     }
@@ -1009,7 +1009,7 @@ pub fn call_native(
         [] -> value.JsUndefined
       }
       use #(key_str, state) <- result.try(
-        frame.rethrow(coerce.js_to_string(state, key_val)),
+        state.rethrow(coerce.js_to_string(state, key_val)),
       )
       // Step 2-4: Look up in GlobalSymbolRegistry, return existing or create new.
       case dict.get(state.symbol_registry, key_str) {
@@ -1051,7 +1051,7 @@ pub fn call_native(
           Ok(State(..state, stack: [val, ..rest_stack], pc: state.pc + 1))
         }
         _ ->
-          frame.rethrow(coerce.thrown_type_error(
+          state.rethrow(coerce.thrown_type_error(
             state,
             "Symbol.keyFor requires a Symbol argument",
           ))
@@ -1150,7 +1150,7 @@ pub fn do_construct(
               ObjectSlot(
                 kind: OrdinaryObject,
                 properties: dict.new(),
-                elements: js_elements.new(),
+                elements: elements.new(),
                 prototype: proto,
                 symbol_properties: dict.new(),
                 extensible: True,
@@ -1205,7 +1205,7 @@ pub fn do_construct(
         dispatch_fn,
       )
     _ ->
-      frame.throw_type_error(
+      state.throw_type_error(
         state,
         object.inspect(JsObject(ctor_ref), state.heap)
           <> " is not a constructor",
@@ -1240,7 +1240,7 @@ pub fn construct_value(
           ObjectSlot(
             kind: OrdinaryObject,
             properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: proto,
             symbol_properties: dict.new(),
             extensible: True,
@@ -1293,7 +1293,7 @@ pub fn construct_value(
         dispatch_fn,
       )
     _ ->
-      frame.throw_type_error(
+      state.throw_type_error(
         state,
         object.inspect(JsObject(target_ref), state.heap)
           <> " is not a constructor",
@@ -1341,13 +1341,13 @@ pub fn call_value(
             dispatch_fn,
           )
         _ ->
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             object.inspect(callee, state.heap) <> " is not a function",
           )
       }
     _ ->
-      frame.throw_type_error(
+      state.throw_type_error(
         state,
         object.inspect(callee, state.heap) <> " is not a function",
       )
@@ -1355,7 +1355,7 @@ pub fn call_value(
 }
 
 /// Extract elements from an array object as a list of JsValues.
-/// Used by Function.prototype.apply to unpack the args array.
+/// Used by Function.prototype.apply to unpack the args tuple_array.
 pub fn extract_array_args(h: Heap, ref: Ref) -> List(JsValue) {
   heap.read_array_like(h, ref)
   |> option.map(fn(p) { extract_elements_loop(p.1, 0, p.0, []) })
@@ -1371,7 +1371,7 @@ fn extract_elements_loop(
   case idx >= length {
     True -> list.reverse(acc)
     False -> {
-      let val = js_elements.get(elements, idx)
+      let val = elements.get(elements, idx)
       extract_elements_loop(elements, idx + 1, length, [val, ..acc])
     }
   }
@@ -1408,13 +1408,13 @@ pub fn function_to_string(
           #(state, Ok(JsString("function " <> name <> "() { [native code] }")))
         }
         _ ->
-          frame.type_error(
+          state.type_error(
             state,
             "Function.prototype.toString requires that 'this' be a Function",
           )
       }
     _ ->
-      frame.type_error(
+      state.type_error(
         state,
         "Function.prototype.toString requires that 'this' be a Function",
       )
@@ -1474,18 +1474,18 @@ pub fn dispatch_native(
     value.RegExpNative(n) -> builtins_regexp.dispatch(n, args, this, state)
     // Standalone VM-level natives
     value.VmNative(value.FunctionConstructor) ->
-      frame.type_error(state, "Function constructor is not supported")
+      state.type_error(state, "Function constructor is not supported")
     value.VmNative(value.IteratorSymbolIterator) -> #(state, Ok(this))
     value.VmNative(value.FunctionToString) -> function_to_string(this, state)
     // Global functions: eval, URI encoding/decoding
     value.VmNative(value.Eval) ->
-      frame.type_error(state, "eval is not supported")
+      state.type_error(state, "eval is not supported")
     value.VmNative(value.DecodeURI) -> {
       let arg = case args {
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- frame.try_to_string(state, arg)
+      use str, state <- state.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_decode(str))))
     }
     value.VmNative(value.EncodeURI) -> {
@@ -1493,7 +1493,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- frame.try_to_string(state, arg)
+      use str, state <- state.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_encode(str, True))))
     }
     value.VmNative(value.DecodeURIComponent) -> {
@@ -1501,7 +1501,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- frame.try_to_string(state, arg)
+      use str, state <- state.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_decode(str))))
     }
     value.VmNative(value.EncodeURIComponent) -> {
@@ -1509,7 +1509,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- frame.try_to_string(state, arg)
+      use str, state <- state.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_encode(str, False))))
     }
     // AnnexB B.2.1.1 escape ( string )
@@ -1518,7 +1518,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- frame.try_to_string(state, arg)
+      use str, state <- state.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.js_escape(str))))
     }
     // AnnexB B.2.1.2 unescape ( string )
@@ -1527,7 +1527,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- frame.try_to_string(state, arg)
+      use str, state <- state.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.js_unescape(str))))
     }
   }

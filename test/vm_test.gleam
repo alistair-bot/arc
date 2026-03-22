@@ -1,12 +1,11 @@
-import arc/vm/array
 import arc/vm/builtins
 import arc/vm/builtins/common
 import arc/vm/completion.{
   type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
 }
-import arc/vm/frame
+import arc/vm/exec/entry
 import arc/vm/heap
-import arc/vm/object
+import arc/vm/internal/tuple_array
 import arc/vm/opcode.{
   type Op, Add, BinOp, BitAnd, BitNot, BitOr, BitXor, DefineField, Div, Dup, Eq,
   Exp, GetField, GetLocal, Gt, GtEq, Jump, JumpIfFalse, JumpIfTrue, LogicalNot,
@@ -14,7 +13,8 @@ import arc/vm/opcode.{
   PutField, PutLocal, Return, ShiftLeft, ShiftRight, StrictEq, StrictNotEq, Sub,
   Swap, UShiftRight, UnaryOp, Void,
 }
-import arc/vm/run
+import arc/vm/ops/object
+import arc/vm/state
 import arc/vm/value.{
   type FuncTemplate, AccessorProperty, DataProperty, Finite, FuncTemplate,
   JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined,
@@ -48,9 +48,9 @@ fn make_func(
     name: None,
     arity: 0,
     local_count:,
-    bytecode: array.from_list(bytecode),
-    constants: array.from_list(constants),
-    functions: array.from_list([]),
+    bytecode: tuple_array.from_list(bytecode),
+    constants: tuple_array.from_list(constants),
+    functions: tuple_array.from_list([]),
     env_descriptors: [],
     is_strict: False,
     is_arrow: False,
@@ -64,12 +64,12 @@ fn make_func(
 fn run_simple(
   bytecode: List(Op),
   constants: List(value.JsValue),
-) -> Result(value.JsValue, frame.VmError) {
+) -> Result(value.JsValue, state.VmError) {
   let func = make_func(bytecode, constants, 0)
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
-  case run.run(func, h, b, global_object, False) {
+  case entry.run(func, h, b, global_object, False) {
     Ok(NormalCompletion(val, _heap)) -> Ok(val)
     Ok(ThrowCompletion(_, _)) -> panic as "unexpected ThrowCompletion"
     Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
@@ -81,12 +81,12 @@ fn run_simple(
 fn run_throwing(
   bytecode: List(Op),
   constants: List(value.JsValue),
-) -> Result(value.JsValue, frame.VmError) {
+) -> Result(value.JsValue, state.VmError) {
   let func = make_func(bytecode, constants, 0)
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
-  case run.run(func, h, b, global_object, False) {
+  case entry.run(func, h, b, global_object, False) {
     Ok(ThrowCompletion(val, _heap)) -> Ok(val)
     Ok(NormalCompletion(_, _)) ->
       panic as "expected ThrowCompletion, got NormalCompletion"
@@ -96,11 +96,11 @@ fn run_throwing(
 }
 
 /// Helper: run func with locals + builtins, return Completion.
-fn run_func(func: FuncTemplate) -> Result(Completion, frame.VmError) {
+fn run_func(func: FuncTemplate) -> Result(Completion, state.VmError) {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
-  run.run(func, h, b, global_object, False)
+  entry.run(func, h, b, global_object, False)
 }
 
 // ============================================================================
@@ -603,12 +603,12 @@ pub fn strict_eq_bool_number_false_test() {
 // ============================================================================
 
 pub fn stack_underflow_test() {
-  let assert Error(frame.StackUnderflow("Pop")) = run_simple([Pop], [])
+  let assert Error(state.StackUnderflow("Pop")) = run_simple([Pop], [])
 }
 
 pub fn local_out_of_bounds_test() {
   let func = make_func([GetLocal(5)], [], 1)
-  let assert Error(frame.LocalIndexOutOfBounds(5)) = run_func(func)
+  let assert Error(state.LocalIndexOutOfBounds(5)) = run_func(func)
 }
 
 // ============================================================================
@@ -667,7 +667,7 @@ pub fn tdz_throws_reference_error_test() {
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
   let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
-    run.run(func, h, b, global_object, False)
+    entry.run(func, h, b, global_object, False)
   // Check it's a ReferenceError via prototype chain
   let assert Ok(JsString("ReferenceError")) = get_data(heap, ref, "name")
 }
@@ -684,7 +684,7 @@ pub fn type_error_thrown_for_symbol_conversion_test() {
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
   let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
-    run.run(func, h, b, global_object, False)
+    entry.run(func, h, b, global_object, False)
   let assert Ok(JsString("TypeError")) = get_data(heap, ref, "name")
 }
 
@@ -737,7 +737,7 @@ pub fn get_field_on_null_throws_type_error_test() {
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
   let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
-    run.run(func, h, b, global_object, False)
+    entry.run(func, h, b, global_object, False)
   let assert Ok(JsString("TypeError")) = get_data(heap, ref, "name")
 }
 
@@ -748,7 +748,7 @@ pub fn get_field_on_undefined_throws_type_error_test() {
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
   let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
-    run.run(func, h, b, global_object, False)
+    entry.run(func, h, b, global_object, False)
   let assert Ok(JsString("TypeError")) = get_data(heap, ref, "name")
 }
 

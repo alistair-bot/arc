@@ -10,11 +10,11 @@
 import arc/compiler
 import arc/erlang
 import arc/parser
-import arc/vm/array
 import arc/vm/builtins/common.{type Builtins}
+import arc/vm/exec/entry
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/run
+import arc/vm/internal/elements
+import arc/vm/internal/tuple_array
 import arc/vm/value.{
   type JsValue, type Ref, DataProperty, JsObject, JsString, JsUndefined,
   ObjectSlot, OrdinaryObject,
@@ -383,7 +383,7 @@ fn eval_module_body(
         )
 
       case
-        run.run_module_with_imports(
+        entry.run_module_with_imports(
           compiled.template,
           heap,
           builtins,
@@ -392,7 +392,7 @@ fn eval_module_body(
           event_loop,
         )
       {
-        run.ModuleError(error: vm_err) -> {
+        entry.ModuleError(error: vm_err) -> {
           let error_val = JsString("InternalError: " <> string.inspect(vm_err))
           let state =
             EvalState(
@@ -401,7 +401,7 @@ fn eval_module_body(
             )
           #(state, Error(EvaluationError(error_val)))
         }
-        run.ModuleThrow(value: thrown_val, ..) -> {
+        entry.ModuleThrow(value: thrown_val, ..) -> {
           let state =
             EvalState(
               ..state,
@@ -409,7 +409,7 @@ fn eval_module_body(
             )
           #(state, Error(EvaluationError(thrown_val)))
         }
-        run.ModuleOk(value: val, heap: new_heap, locals:) -> {
+        entry.ModuleOk(value: val, heap: new_heap, locals:) -> {
           let #(module_exports, new_heap) =
             collect_exports(
               state.evaluated,
@@ -509,7 +509,7 @@ fn resolve_imports(
                   ObjectSlot(
                     kind: OrdinaryObject,
                     properties:,
-                    elements: js_elements.new(),
+                    elements: elements.new(),
                     prototype: None,
                     symbol_properties: dict.new(),
                     extensible: False,
@@ -532,7 +532,7 @@ fn collect_exports(
   specifier_map: Dict(String, String),
   export_entries: List(compiler.ExportEntry),
   scope_dict: Dict(String, Int),
-  locals: array.Array(JsValue),
+  locals: tuple_array.Array(JsValue),
   heap: Heap,
 ) -> #(Dict(String, JsValue), Heap) {
   list.fold(export_entries, #(dict.new(), heap), fn(acc, entry) {
@@ -541,7 +541,7 @@ fn collect_exports(
       compiler.LocalExport(export_name:, local_name:) ->
         dict.get(scope_dict, local_name)
         |> result.try(fn(index) {
-          array.get(index, locals) |> option.to_result(Nil)
+          tuple_array.get(index, locals) |> option.to_result(Nil)
         })
         |> result.map(fn(val) { #(dict.insert(acc, export_name, val), heap) })
         |> result.unwrap(#(acc, heap))
@@ -588,7 +588,7 @@ fn collect_exports(
                 ObjectSlot(
                   kind: OrdinaryObject,
                   properties:,
-                  elements: js_elements.new(),
+                  elements: elements.new(),
                   prototype: None,
                   symbol_properties: dict.new(),
                   extensible: False,

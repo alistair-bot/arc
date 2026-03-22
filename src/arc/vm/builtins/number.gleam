@@ -1,7 +1,7 @@
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/math as builtins_math
-import arc/vm/frame.{type State}
 import arc/vm/heap.{type Heap}
+import arc/vm/state.{type State}
 import arc/vm/value.{
   type JsNum, type JsValue, type NumberNativeFn, type Ref, Dispatch, Finite,
   GlobalIsFinite, GlobalIsNaN, GlobalParseFloat, GlobalParseInt, Infinity,
@@ -217,13 +217,13 @@ pub fn parse_int(
   // Step 2: Let S be TrimString(inputString, START).
   let str_result = case args {
     [val, ..] -> {
-      use #(s, state) <- result.map(frame.to_string(state, val))
+      use #(s, state) <- result.map(state.to_string(state, val))
       // Step 2: TrimString(inputString, START) — leading whitespace only
       #(string.trim_start(s), state)
     }
     [] -> Ok(#("", state))
   }
-  use str, state <- frame.try_op(str_result)
+  use str, state <- state.try_op(str_result)
   // Steps 6-9: Determine radix R.
   // If R is 0, NaN, or Infinity, default to 10.
   let radix = case args {
@@ -278,13 +278,13 @@ pub fn parse_float(
   // Step 2: Let trimmedString be TrimString(inputString, START).
   let str_result = case args {
     [val, ..] -> {
-      use #(s, state) <- result.map(frame.to_string(state, val))
+      use #(s, state) <- result.map(state.to_string(state, val))
       // Step 2: TrimString(inputString, START) — leading whitespace only
       #(string.trim_start(s), state)
     }
     [] -> Ok(#("", state))
   }
-  use str, state <- frame.try_op(str_result)
+  use str, state <- state.try_op(str_result)
   // Steps 3-6: Parse as StrDecimalLiteral.
   #(state, Ok(JsNumber(parse_decimal_string(str))))
 }
@@ -462,7 +462,7 @@ pub fn number_to_string(
   // Step 4: If radixMV not in [2, 36], throw RangeError.
   case radix >= 2 && radix <= 36 {
     False ->
-      frame.range_error(state, "toString() radix must be between 2 and 36")
+      state.range_error(state, "toString() radix must be between 2 and 36")
     // Step 5: Return Number::toString(x, radixMV).
     True -> #(state, Ok(JsString(value.format_number_radix(n, radix))))
   }
@@ -524,7 +524,7 @@ pub fn number_to_fixed(
   }
   case f < 0 || f > 100 {
     True ->
-      frame.range_error(
+      state.range_error(
         state,
         "toFixed() digits argument must be between 0 and 100",
       )
@@ -545,7 +545,7 @@ pub fn number_to_exponential(
   }
   case f > 100 || f < -1 {
     True ->
-      frame.range_error(
+      state.range_error(
         state,
         "toExponential() argument must be between 0 and 100",
       )
@@ -573,7 +573,7 @@ pub fn number_to_precision(
       let p = arg_to_int(v, 0)
       case p < 1 || p > 100 {
         True ->
-          frame.range_error(
+          state.range_error(
             state,
             "toPrecision() argument must be between 1 and 100",
           )
@@ -601,7 +601,7 @@ fn require_number(
   case this_number_value(state, this) {
     Some(n) -> cont(n, state)
     None ->
-      frame.type_error(
+      state.type_error(
         state,
         "Number.prototype." <> method <> " requires that 'this' be a Number",
       )

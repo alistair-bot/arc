@@ -1,5 +1,5 @@
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
 import arc/vm/value.{
   type CallNativeFn, type ExoticKind, type JsValue, type NativeFn,
   type NativeFnSlot, type Property, type Ref, ArrayObject, Call, Dispatch,
@@ -81,7 +81,7 @@ pub fn alloc_proto(
       ObjectSlot(
         kind: OrdinaryObject,
         properties:,
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype:,
         symbol_properties: dict.new(),
         extensible: True,
@@ -102,7 +102,7 @@ pub fn alloc_pojo(
       kind: OrdinaryObject,
       properties: dict.from_list(props),
       symbol_properties: dict.new(),
-      elements: js_elements.new(),
+      elements: elements.new(),
       prototype: Some(object_proto),
       extensible: True,
     ),
@@ -142,7 +142,7 @@ fn alloc_native_fn_slot(
           #("length", fn_length_property(arity)),
         ]),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         extensible: True,
       ),
@@ -300,7 +300,7 @@ pub fn init_type(
           arity,
           ctor_props,
         )),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -316,7 +316,7 @@ pub fn init_type(
       ObjectSlot(
         kind: OrdinaryObject,
         properties: dict.from_list(proto_properties(ctor_ref, proto_props)),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(parent_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -374,7 +374,7 @@ pub fn init_type_on(
           arity,
           ctor_props,
         )),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -444,7 +444,7 @@ fn alloc_error(h: Heap, proto: Ref, message: String) -> #(Heap, JsValue) {
         properties: dict.from_list([
           #("message", value.builtin_property(JsString(message))),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         // Step 2: [[Prototype]] set to the NativeError prototype
         prototype: Some(proto),
         symbol_properties: dict.new(),
@@ -560,7 +560,7 @@ fn alloc_wrapper(h: Heap, kind: ExoticKind, proto: Ref) -> #(Heap, Ref) {
     ObjectSlot(
       kind:,
       properties: dict.new(),
-      elements: js_elements.new(),
+      elements: elements.new(),
       prototype: Some(proto),
       symbol_properties: dict.new(),
       extensible: True,
@@ -601,7 +601,7 @@ pub fn alloc_array(
       // Step 7: length stored in ArrayObject(count)
       kind: ArrayObject(count),
       properties: dict.new(),
-      elements: js_elements.from_list(values),
+      elements: elements.from_list(values),
       // Step 5: [[Prototype]] = proto
       prototype: Some(array_proto),
       symbol_properties: dict.new(),

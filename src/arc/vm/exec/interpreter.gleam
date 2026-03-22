@@ -1,22 +1,14 @@
-import arc/vm/array
-import arc/vm/array_ops
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/builtins/regexp as builtins_regexp
-import arc/vm/call
-import arc/vm/coerce
 import arc/vm/completion.{
   type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
 }
-import arc/vm/event_loop
-import arc/vm/frame.{
-  type State, type StepResult, type VmError, Done, LocalIndexOutOfBounds,
-  SavedFrame, StackUnderflow, State, StepVmError, Thrown, TryFrame,
-  Unimplemented, Yielded,
-}
-import arc/vm/generators
+import arc/vm/exec/call
+import arc/vm/exec/event_loop
+import arc/vm/exec/generators
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/internal/tuple_array
 import arc/vm/opcode.{
   type Op, Add, ArrayFrom, ArrayFromWithHoles, ArrayPush, ArrayPushHole,
   ArraySpread, Await, BinOp, BoxLocal, Call, CallApply, CallConstructor,
@@ -30,8 +22,16 @@ import arc/vm/opcode.{
   PutBoxed, PutElem, PutField, PutGlobal, PutLocal, Return, SetupDerivedClass,
   Swap, TypeOf, TypeofGlobal, UnaryOp, Yield,
 }
-import arc/vm/operators
-import arc/vm/property_access
+import arc/vm/ops/array as array_ops
+import arc/vm/ops/coerce
+import arc/vm/ops/object
+import arc/vm/ops/operators
+import arc/vm/ops/property
+import arc/vm/state.{
+  type State, type StepResult, type VmError, Done, LocalIndexOutOfBounds,
+  SavedFrame, StackUnderflow, State, StepVmError, Thrown, TryFrame,
+  Unimplemented, Yielded,
+}
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, ArrayIteratorSlot, ArrayObject,
   DataProperty, Finite, ForInIteratorSlot, FunctionObject, GeneratorObject,
@@ -47,7 +47,7 @@ import gleam/set
 import gleam/string
 
 // ============================================================================
-// Internal state (types defined in frame.gleam for cross-module access)
+// Internal state (types defined in state.gleam for cross-module access)
 // ============================================================================
 
 /// The js_to_string callback that gets stored in State.
@@ -83,7 +83,7 @@ fn call_fn_callback(
 /// for cases that need non-default this_binding or symbol_descriptions.
 pub fn new_state(
   func: FuncTemplate,
-  locals: array.Array(JsValue),
+  locals: tuple_array.Array(JsValue),
   heap: Heap,
   builtins: Builtins,
   global_object: Ref,
@@ -133,7 +133,7 @@ pub fn init_state(
   is_module: Bool,
   event_loop: Bool,
 ) -> State {
-  let locals = array.repeat(JsUndefined, func.local_count)
+  let locals = tuple_array.repeat(JsUndefined, func.local_count)
   // ES §16.2.1.5.2 ModuleEvaluation: module `this` is undefined.
   // ES §16.1.6 ScriptEvaluation: the script's this is the global object,
   // regardless of strict mode. (Strict only affects function-body this.)
@@ -165,7 +165,7 @@ pub fn init_state(
 /// Main execution loop. Tail-recursive.
 /// Returns the completion and the final state (for job queue access).
 pub fn execute_inner(state: State) -> Result(#(Completion, State), VmError) {
-  case array.get(state.pc, state.code) {
+  case tuple_array.get(state.pc, state.code) {
     None -> {
       // Reached end of bytecode — return top of stack or undefined
       case state.stack {
@@ -368,11 +368,11 @@ fn step_stack(
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   case op {
     PushConst(index) -> {
-      case array.get(index, state.constants) {
+      case tuple_array.get(index, state.constants) {
         Some(value) ->
           Ok(State(..state, stack: [value, ..state.stack], pc: state.pc + 1))
         None -> {
-          frame.throw_range_error(
+          state.throw_range_error(
             state,
             "constant index out of bounds: " <> int.to_string(index),
           )
@@ -421,9 +421,9 @@ fn step_locals(
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   case op {
     GetLocal(index) -> {
-      case array.get(index, state.locals) {
+      case tuple_array.get(index, state.locals) {
         Some(JsUninitialized) -> {
-          frame.throw_reference_error(
+          state.throw_reference_error(
             state,
             "Cannot access variable before initialization (TDZ)",
           )
@@ -442,7 +442,7 @@ fn step_locals(
     PutLocal(index) -> {
       case state.stack {
         [value, ..rest] -> {
-          case array.set(index, value, state.locals) {
+          case tuple_array.set(index, value, state.locals) {
             Ok(new_locals) ->
               Ok(
                 State(
@@ -472,11 +472,11 @@ fn step_locals(
     BoxLocal(index) -> {
       // Wrap the current value in locals[index] into a BoxSlot on the heap.
       // Replace the local with a JsObject(box_ref).
-      case array.get(index, state.locals) {
+      case tuple_array.get(index, state.locals) {
         Some(current_value) -> {
           let #(heap, box_ref) =
             heap.alloc(state.heap, value.BoxSlot(current_value))
-          case array.set(index, JsObject(box_ref), state.locals) {
+          case tuple_array.set(index, JsObject(box_ref), state.locals) {
             Ok(locals) -> Ok(State(..state, heap:, locals:, pc: state.pc + 1))
             Error(_) ->
               Error(#(
@@ -497,7 +497,7 @@ fn step_locals(
 
     GetBoxed(index) -> {
       // Read locals[index] (a JsObject(box_ref)), dereference BoxSlot, push value.
-      case array.get(index, state.locals) {
+      case tuple_array.get(index, state.locals) {
         Some(JsObject(box_ref)) ->
           case heap.read_box(state.heap, box_ref) {
             Some(val) ->
@@ -522,7 +522,7 @@ fn step_locals(
       // Pop value from stack, write into the BoxSlot pointed to by locals[index].
       case state.stack {
         [new_value, ..rest_stack] -> {
-          case array.get(index, state.locals) {
+          case tuple_array.get(index, state.locals) {
             Some(JsObject(box_ref)) -> {
               let heap =
                 heap.write(state.heap, box_ref, value.BoxSlot(new_value))
@@ -564,7 +564,7 @@ fn step_globals(
       case dict.get(state.lexical_globals, name) {
         // Lexical binding exists — check for TDZ
         Ok(JsUninitialized) ->
-          frame.throw_reference_error(
+          state.throw_reference_error(
             state,
             "Cannot access '" <> name <> "' before initialization",
           )
@@ -577,7 +577,7 @@ fn step_globals(
               Ok(State(..state, stack: [val, ..state.stack], pc: state.pc + 1))
             Some(value.AccessorProperty(get: Some(getter), ..)) ->
               case
-                frame.call(state, getter, JsObject(state.global_object), [])
+                state.call(state, getter, JsObject(state.global_object), [])
               {
                 Ok(#(val, state)) ->
                   Ok(
@@ -620,7 +620,7 @@ fn step_globals(
                       Error(#(Thrown, thrown, state.heap))
                   }
                 False ->
-                  frame.throw_reference_error(state, name <> " is not defined")
+                  state.throw_reference_error(state, name <> " is not defined")
               }
           }
       }
@@ -633,12 +633,12 @@ fn step_globals(
           // 1. Check const lexical
           case set.contains(state.const_lexical_globals, name) {
             True ->
-              frame.throw_type_error(state, "Assignment to constant variable.")
+              state.throw_type_error(state, "Assignment to constant variable.")
             False ->
               // 2. Check lexical globals
               case dict.get(state.lexical_globals, name) {
                 Ok(JsUninitialized) ->
-                  frame.throw_reference_error(
+                  state.throw_reference_error(
                     state,
                     "Cannot access '" <> name <> "' before initialization",
                   )
@@ -668,7 +668,7 @@ fn step_globals(
                         )
                       {
                         False ->
-                          frame.throw_reference_error(
+                          state.throw_reference_error(
                             state,
                             name <> " is not defined",
                           )
@@ -685,7 +685,7 @@ fn step_globals(
                             Ok(#(state, True)) ->
                               Ok(State(..state, pc: state.pc + 1))
                             Ok(#(state, False)) ->
-                              frame.throw_type_error(
+                              state.throw_type_error(
                                 state,
                                 "Cannot assign to read only property '"
                                   <> name
@@ -808,7 +808,7 @@ fn step_globals(
       case dict.get(state.lexical_globals, name) {
         // TDZ — typeof on uninitialized lexical still throws per spec
         Ok(JsUninitialized) ->
-          frame.throw_reference_error(
+          state.throw_reference_error(
             state,
             "Cannot access '" <> name <> "' before initialization",
           )
@@ -881,7 +881,7 @@ fn step_operators(
           case kind {
             opcode.InstanceOf -> {
               use #(result, state) <- result.map(
-                frame.rethrow(coerce.js_instanceof(state, left, right)),
+                state.rethrow(coerce.js_instanceof(state, left, right)),
               )
               State(..state, stack: [JsBool(result), ..rest], pc: state.pc + 1)
             }
@@ -904,7 +904,7 @@ fn step_operators(
                       Error(#(Thrown, thrown, state.heap))
                   }
                 _ ->
-                  frame.throw_type_error(
+                  state.throw_type_error(
                     state,
                     "Cannot use 'in' operator to search for '"
                       <> object.inspect(left, state.heap)
@@ -965,7 +965,7 @@ fn step_operators(
                         ),
                       )
                     Error(msg) -> {
-                      frame.throw_type_error(state, msg)
+                      state.throw_type_error(state, msg)
                     }
                   }
               }
@@ -974,7 +974,7 @@ fn step_operators(
                 Ok(result) ->
                   Ok(State(..state, stack: [result, ..rest], pc: state.pc + 1))
                 Error(msg) -> {
-                  frame.throw_type_error(state, msg)
+                  state.throw_type_error(state, msg)
                 }
               }
           }
@@ -991,7 +991,7 @@ fn step_operators(
             Ok(result) ->
               Ok(State(..state, stack: [result, ..rest], pc: state.pc + 1))
             Error(msg) -> {
-              frame.throw_type_error(state, msg)
+              state.throw_type_error(state, msg)
             }
           }
         }
@@ -1093,7 +1093,7 @@ fn step_control_flow(
                     JsUndefined ->
                       case state.this_binding {
                         JsUninitialized -> {
-                          frame.throw_reference_error(
+                          state.throw_reference_error(
                             state,
                             "Must call super constructor in derived class before returning from derived constructor",
                           )
@@ -1118,7 +1118,7 @@ fn step_control_flow(
                           )
                       }
                     _ -> {
-                      frame.throw_type_error(
+                      state.throw_type_error(
                         state,
                         "Derived constructors may only return object or undefined",
                       )
@@ -1198,7 +1198,7 @@ fn step_control_flow(
       Ok(
         State(
           ..state,
-          finally_stack: [frame.NormalCompletion, ..state.finally_stack],
+          finally_stack: [state.NormalCompletion, ..state.finally_stack],
           pc: state.pc + 1,
         ),
       )
@@ -1213,7 +1213,7 @@ fn step_control_flow(
               ..state,
               stack: rest_stack,
               finally_stack: [
-                frame.ThrowCompletion(thrown_value),
+                state.ThrowCompletion(thrown_value),
                 ..state.finally_stack
               ],
               pc: state.pc + 1,
@@ -1230,11 +1230,11 @@ fn step_control_flow(
 
     opcode.LeaveFinally -> {
       case state.finally_stack {
-        [frame.NormalCompletion, ..rest] ->
+        [state.NormalCompletion, ..rest] ->
           Ok(State(..state, finally_stack: rest, pc: state.pc + 1))
-        [frame.ThrowCompletion(value:), ..] ->
+        [state.ThrowCompletion(value:), ..] ->
           Error(#(Thrown, value, state.heap))
-        [frame.ReturnCompletion(value:), ..] ->
+        [state.ReturnCompletion(value:), ..] ->
           Error(#(Done, value, state.heap))
         [] ->
           Error(#(
@@ -1266,7 +1266,7 @@ fn step_objects(
           ObjectSlot(
             kind: OrdinaryObject,
             properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.object.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -1285,7 +1285,7 @@ fn step_objects(
     GetField(name) -> {
       case state.stack {
         [JsNull as v, ..] | [JsUndefined as v, ..] ->
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             "Cannot read properties of "
               <> value.nullish_label(v)
@@ -1295,7 +1295,7 @@ fn step_objects(
           )
         [receiver, ..rest] -> {
           use #(val, state) <- result.map(
-            frame.rethrow(object.get_value_of(state, receiver, name)),
+            state.rethrow(object.get_value_of(state, receiver, name)),
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
@@ -1313,7 +1313,7 @@ fn step_objects(
       // Stack: [obj, ..rest] → [prop_value, obj, ..rest]
       case state.stack {
         [JsNull as v, ..] | [JsUndefined as v, ..] ->
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             "Cannot read properties of "
               <> value.nullish_label(v)
@@ -1323,7 +1323,7 @@ fn step_objects(
           )
         [receiver, ..rest] -> {
           use #(val, state) <- result.map(
-            frame.rethrow(object.get_value_of(state, receiver, name)),
+            state.rethrow(object.get_value_of(state, receiver, name)),
           )
           State(..state, stack: [val, receiver, ..rest], pc: state.pc + 1)
         }
@@ -1344,7 +1344,7 @@ fn step_objects(
           // set_value walks proto chain, calls setters, handles non-writable.
           // Sloppy mode: ignore failure (strict mode TypeError is a TODO).
           use #(state, _ok) <- result.map(
-            frame.rethrow(object.set_value(state, ref, name, value, receiver)),
+            state.rethrow(object.set_value(state, ref, name, value, receiver)),
           )
           State(..state, stack: [value, ..rest], pc: state.pc + 1)
         }
@@ -1423,7 +1423,7 @@ fn step_objects(
       case state.stack {
         [func, key, JsObject(ref) as obj, ..rest] -> {
           use #(key_str, state) <- result.map(
-            frame.rethrow(coerce.js_to_string(state, key)),
+            state.rethrow(coerce.js_to_string(state, key)),
           )
           let heap =
             object.define_accessor(state.heap, ref, key_str, func, kind)
@@ -1448,7 +1448,7 @@ fn step_objects(
       case state.stack {
         [val, key, JsObject(ref) as obj, ..rest] -> {
           use state <- result.map(
-            frame.rethrow(property_access.put_elem_value(state, ref, key, val)),
+            state.rethrow(property.put_elem_value(state, ref, key, val)),
           )
           State(..state, stack: [obj, ..rest], pc: state.pc + 1)
         }
@@ -1472,7 +1472,7 @@ fn step_objects(
       case state.stack {
         [source, JsObject(ref) as obj, ..rest] -> {
           use state <- result.map(
-            frame.rethrow(object.copy_data_properties(state, ref, source)),
+            state.rethrow(object.copy_data_properties(state, ref, source)),
           )
           State(..state, stack: [obj, ..rest], pc: state.pc + 1)
         }
@@ -1524,7 +1524,7 @@ fn step_objects(
           case obj {
             JsObject(ref) -> {
               use #(key_str, state) <- result.map(
-                frame.rethrow(coerce.js_to_string(state, key)),
+                state.rethrow(coerce.js_to_string(state, key)),
               )
               let #(heap, success) =
                 object.delete_property(state.heap, ref, key_str)
@@ -1607,7 +1607,7 @@ fn step_objects(
           )
         }
         _ -> {
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             "Class extends value is not a constructor or null",
           )
@@ -1619,7 +1619,7 @@ fn step_objects(
       case state.this_binding {
         // TDZ check: in derived constructors, this is uninitialized until super() is called
         JsUninitialized -> {
-          frame.throw_reference_error(
+          state.throw_reference_error(
             state,
             "Must call super constructor in derived class before accessing 'this'",
           )
@@ -1659,7 +1659,7 @@ fn step_arrays(
               ObjectSlot(
                 kind: ArrayObject(count),
                 properties: dict.new(),
-                elements: js_elements.from_list(elements),
+                elements: elements.from_list(elements),
                 prototype: Some(state.builtins.array.prototype),
                 symbol_properties: dict.new(),
                 extensible: True,
@@ -1685,7 +1685,7 @@ fn step_arrays(
 
     ArrayFromWithHoles(count, holes) -> {
       // Pop only the non-hole values (count - len(holes)), then zip them with
-      // the non-hole indices and build a SparseElements-backed array.
+      // the non-hole indices and build a SparseElements-backed tuple_array.
       // The emitter guarantees `holes` is non-empty (empty → ArrayFrom used),
       // sorted ascending, and all indices are in [0, count).
       let value_count = count - list.length(holes)
@@ -1699,7 +1699,7 @@ fn step_arrays(
               ObjectSlot(
                 kind: ArrayObject(count),
                 properties: dict.new(),
-                elements: js_elements.from_indexed(indexed),
+                elements: elements.from_indexed(indexed),
                 prototype: Some(state.builtins.array.prototype),
                 symbol_properties: dict.new(),
                 extensible: True,
@@ -1728,22 +1728,22 @@ fn step_arrays(
       case state.stack {
         [key, JsObject(ref), ..rest] -> {
           use #(val, state) <- result.map(
-            frame.rethrow(property_access.get_elem_value(state, ref, key)),
+            state.rethrow(property.get_elem_value(state, ref, key)),
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
         [_, JsNull as v, ..] | [_, JsUndefined as v, ..] ->
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             "Cannot read properties of " <> value.nullish_label(v),
           )
         [key, receiver, ..rest] -> {
           // Primitive receiver: stringify key, delegate to get_value_of
           use #(key_str, state) <- result.try(
-            frame.rethrow(coerce.js_to_string(state, key)),
+            state.rethrow(coerce.js_to_string(state, key)),
           )
           use #(val, state) <- result.map(
-            frame.rethrow(object.get_value_of(state, receiver, key_str)),
+            state.rethrow(object.get_value_of(state, receiver, key_str)),
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
@@ -1761,16 +1761,16 @@ fn step_arrays(
       case state.stack {
         [key, JsObject(ref) as obj, ..rest] -> {
           use #(val, state) <- result.map(
-            frame.rethrow(property_access.get_elem_value(state, ref, key)),
+            state.rethrow(property.get_elem_value(state, ref, key)),
           )
           State(..state, stack: [val, key, obj, ..rest], pc: state.pc + 1)
         }
         [key, receiver, ..rest] -> {
           use #(key_str, state) <- result.try(
-            frame.rethrow(coerce.js_to_string(state, key)),
+            state.rethrow(coerce.js_to_string(state, key)),
           )
           use #(val, state) <- result.map(
-            frame.rethrow(object.get_value_of(state, receiver, key_str)),
+            state.rethrow(object.get_value_of(state, receiver, key_str)),
           )
           State(..state, stack: [val, key, receiver, ..rest], pc: state.pc + 1)
         }
@@ -1788,7 +1788,7 @@ fn step_arrays(
       case state.stack {
         [val, key, JsObject(ref), ..rest] -> {
           use state <- result.map(
-            frame.rethrow(property_access.put_elem_value(state, ref, key, val)),
+            state.rethrow(property.put_elem_value(state, ref, key, val)),
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
@@ -1894,7 +1894,7 @@ fn step_calls(
                 Some(ObjectSlot(kind: NativeFunction(native), ..)) ->
                   call_native(state, native, args, rest_stack, JsUndefined)
                 _ ->
-                  frame.throw_type_error(
+                  state.throw_type_error(
                     state,
                     object.inspect(JsObject(obj_ref), state.heap)
                       <> " is not a function",
@@ -1902,7 +1902,7 @@ fn step_calls(
               }
             }
             [non_func, ..] ->
-              frame.throw_type_error(
+              state.throw_type_error(
                 state,
                 object.inspect(non_func, state.heap) <> " is not a function",
               )
@@ -1950,7 +1950,7 @@ fn step_calls(
                 Some(ObjectSlot(kind: NativeFunction(native), ..)) ->
                   call_native(state, native, args, rest_stack, receiver)
                 _ ->
-                  frame.throw_type_error(
+                  state.throw_type_error(
                     state,
                     object.inspect(JsObject(method_ref), state.heap)
                       <> " is not a function",
@@ -1958,7 +1958,7 @@ fn step_calls(
               }
             }
             [non_func, _, ..] ->
-              frame.throw_type_error(
+              state.throw_type_error(
                 state,
                 object.inspect(non_func, state.heap) <> " is not a function",
               )
@@ -1985,7 +1985,7 @@ fn step_calls(
         Some(#(args, [JsObject(ctor_ref), ..rest_stack])) ->
           do_construct(state, ctor_ref, args, rest_stack)
         Some(#(_, [non_func, ..])) -> {
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             object.inspect(non_func, state.heap) <> " is not a constructor",
           )
@@ -2036,7 +2036,7 @@ fn step_calls(
                           ObjectSlot(
                             kind: OrdinaryObject,
                             properties: dict.new(),
-                            elements: js_elements.new(),
+                            elements: elements.new(),
                             prototype: derived_proto,
                             symbol_properties: dict.new(),
                             extensible: True,
@@ -2076,14 +2076,14 @@ fn step_calls(
                         this_val,
                       )
                     _ ->
-                      frame.throw_type_error(
+                      state.throw_type_error(
                         State(..state, heap:),
                         "Super constructor is not a constructor",
                       )
                   }
                 }
                 _ ->
-                  frame.throw_type_error(
+                  state.throw_type_error(
                     state,
                     "Super constructor is not a constructor",
                   )
@@ -2098,7 +2098,7 @@ fn step_calls(
           }
         }
         None -> {
-          frame.throw_reference_error(state, "'super' keyword unexpected here")
+          state.throw_reference_error(state, "'super' keyword unexpected here")
         }
       }
     }
@@ -2111,7 +2111,7 @@ fn step_calls(
           call_value(State(..state, stack: rest), callee, args, JsUndefined)
         }
         [_, callee, ..] -> {
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             object.inspect(callee, state.heap) <> " is not a function",
           )
@@ -2149,7 +2149,7 @@ fn step_calls(
           do_construct(state, ctor_ref, args, rest)
         }
         [_, non_ctor, ..] -> {
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             object.inspect(non_ctor, state.heap) <> " is not a constructor",
           )
@@ -2164,7 +2164,7 @@ fn step_calls(
     }
 
     MakeClosure(func_index) -> {
-      case array.get(func_index, state.func.functions) {
+      case tuple_array.get(func_index, state.func.functions) {
         Some(child_template) -> {
           // Capture values from current frame according to env_descriptors.
           // For boxed captured vars, the local holds a JsObject(box_ref) —
@@ -2173,7 +2173,7 @@ fn step_calls(
             list.map(child_template.env_descriptors, fn(desc) {
               case desc {
                 value.CaptureLocal(parent_index) ->
-                  array.get(parent_index, state.locals)
+                  tuple_array.get(parent_index, state.locals)
                   |> option.unwrap(JsUndefined)
                 value.CaptureEnv(_parent_env_index) ->
                   // Transitive capture not yet implemented
@@ -2201,7 +2201,7 @@ fn step_calls(
                   ObjectSlot(
                     kind: OrdinaryObject,
                     properties: dict.new(),
-                    elements: js_elements.new(),
+                    elements: elements.new(),
                     prototype: Some(state.builtins.object.prototype),
                     symbol_properties: dict.new(),
                     extensible: True,
@@ -2230,7 +2230,7 @@ fn step_calls(
                   env: env_ref,
                 ),
                 properties: fn_properties,
-                elements: js_elements.new(),
+                elements: elements.new(),
                 prototype: Some(state.builtins.function.prototype),
                 symbol_properties: dict.new(),
                 extensible: True,
@@ -2265,7 +2265,7 @@ fn step_calls(
           )
         }
         None -> {
-          frame.throw_range_error(
+          state.throw_range_error(
             state,
             "invalid function index: " <> int.to_string(func_index),
           )
@@ -2403,7 +2403,7 @@ fn step_iteration(
                 Some(ObjectSlot(..)) ->
                   get_iterator_via_symbol(state, ref, iterable, rest)
                 _ ->
-                  frame.throw_type_error(
+                  state.throw_type_error(
                     state,
                     object.inspect(iterable, state.heap) <> " is not iterable",
                   )
@@ -2427,13 +2427,13 @@ fn step_iteration(
                   )
                 }
                 None ->
-                  frame.throw_type_error(
+                  state.throw_type_error(
                     state,
                     object.inspect(iterable, state.heap) <> " is not iterable",
                   )
               }
             _ ->
-              frame.throw_type_error(
+              state.throw_type_error(
                 state,
                 object.inspect(iterable, state.heap) <> " is not iterable",
               )
@@ -2455,7 +2455,7 @@ fn step_iteration(
               // Re-read the source length each time (handles mutations during iteration)
               let #(length, elements) =
                 heap.read_array_like(state.heap, source)
-                |> option.unwrap(#(0, js_elements.new()))
+                |> option.unwrap(#(0, elements.new()))
               case index >= length {
                 True ->
                   // Done — push undefined + done=true
@@ -2473,7 +2473,7 @@ fn step_iteration(
                   )
                 False -> {
                   // Read element at current index
-                  let val = js_elements.get(elements, index)
+                  let val = elements.get(elements, index)
                   // Advance iterator index
                   let heap =
                     heap.write(
@@ -2520,7 +2520,7 @@ fn step_iteration(
                         }
                         Ok(
                           State(
-                            ..frame.merge_globals(state, next_state, []),
+                            ..state.merge_globals(state, next_state, []),
                             heap: next_state.heap,
                             stack: [
                               JsBool(done),
@@ -2656,7 +2656,7 @@ fn step_special(
           ObjectSlot(
             kind: value.ArgumentsObject(length:),
             properties: props,
-            elements: js_elements.from_list(args),
+            elements: elements.from_list(args),
             prototype: Some(state.builtins.object.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -2939,20 +2939,20 @@ fn binop_add_with_to_primitive(
   rest: List(JsValue),
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
   use #(lprim, s1) <- result.try(
-    frame.rethrow(coerce.to_primitive(state, left, coerce.DefaultHint)),
+    state.rethrow(coerce.to_primitive(state, left, coerce.DefaultHint)),
   )
   use #(rprim, s2) <- result.try(
-    frame.rethrow(coerce.to_primitive(s1, right, coerce.DefaultHint)),
+    state.rethrow(coerce.to_primitive(s1, right, coerce.DefaultHint)),
   )
   case lprim, rprim {
     JsString(a), JsString(b) ->
       Ok(State(..s2, stack: [JsString(a <> b), ..rest], pc: state.pc + 1))
     JsString(a), _ -> {
-      use #(b, s3) <- result.map(frame.rethrow(coerce.js_to_string(s2, rprim)))
+      use #(b, s3) <- result.map(state.rethrow(coerce.js_to_string(s2, rprim)))
       State(..s3, stack: [JsString(a <> b), ..rest], pc: state.pc + 1)
     }
     _, JsString(b) -> {
-      use #(a, s3) <- result.map(frame.rethrow(coerce.js_to_string(s2, lprim)))
+      use #(a, s3) <- result.map(state.rethrow(coerce.js_to_string(s2, lprim)))
       State(..s3, stack: [JsString(a <> b), ..rest], pc: state.pc + 1)
     }
     _, _ -> {
@@ -3014,7 +3014,7 @@ fn get_iterator_via_symbol(
       case coerce.is_callable_value(state.heap, method) {
         True ->
           // Step 2: Let iterator be ? Call(method, obj)
-          case frame.call(state, method, iterable, []) {
+          case state.call(state, method, iterable, []) {
             Ok(#(iterator, state)) ->
               case iterator {
                 JsObject(iter_ref) ->
@@ -3026,7 +3026,7 @@ fn get_iterator_via_symbol(
                     ),
                   )
                 _ ->
-                  frame.throw_type_error(
+                  state.throw_type_error(
                     state,
                     "Iterator result is not an object",
                   )
@@ -3034,13 +3034,13 @@ fn get_iterator_via_symbol(
             Error(#(thrown, state)) -> Error(#(Thrown, thrown, state.heap))
           }
         False ->
-          frame.throw_type_error(
+          state.throw_type_error(
             state,
             object.inspect(iterable, state.heap) <> " is not iterable",
           )
       }
     Error(#(_thrown, state)) ->
-      frame.throw_type_error(
+      state.throw_type_error(
         state,
         object.inspect(iterable, state.heap) <> " is not iterable",
       )

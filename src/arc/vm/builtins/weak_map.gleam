@@ -5,9 +5,9 @@
 /// Not truly weak (GC doesn't collect entries) but API-compatible.
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers.{first_arg}
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type Ref, type WeakMapNativeFn, Dispatch, JsObject, JsUndefined,
   ObjectSlot, WeakMapConstructor, WeakMapNative, WeakMapObject,
@@ -81,7 +81,7 @@ fn construct(
       ObjectSlot(
         kind: WeakMapObject(data: dict.new()),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -124,7 +124,7 @@ fn weak_map_set(
       let heap = update_weak_map(state.heap, ref, new_data)
       #(State(..state, heap:), Ok(this))
     }
-    _ -> frame.type_error(state, "Invalid value used as weak map key")
+    _ -> state.type_error(state, "Invalid value used as weak map key")
   }
 }
 
@@ -175,9 +175,9 @@ fn require_weak_map(
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: WeakMapObject(data:), ..)) ->
           cont(data, ref, state)
-        _ -> frame.type_error(state, err)
+        _ -> state.type_error(state, err)
       }
-    _ -> frame.type_error(state, err)
+    _ -> state.type_error(state, err)
   }
 }
 

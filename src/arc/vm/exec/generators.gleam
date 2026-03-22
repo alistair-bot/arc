@@ -1,15 +1,15 @@
-import arc/vm/array
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/completion.{
   type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
 }
-import arc/vm/frame.{
+import arc/vm/heap.{type Heap}
+import arc/vm/internal/elements
+import arc/vm/internal/tuple_array
+import arc/vm/opcode.{type Op, EnterFinallyThrow}
+import arc/vm/state.{
   type FinallyCompletion, type State, type StepResult, type TryFrame, State,
   StepVmError, Thrown, TryFrame, Unimplemented,
 }
-import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/opcode.{type Op, EnterFinallyThrow}
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, GeneratorObject, GeneratorSlot,
   JsBool, JsObject, JsUndefined, ObjectSlot, OrdinaryObject,
@@ -23,7 +23,7 @@ import gleam/option.{type Option, None, Some}
 // ============================================================================
 
 pub type ExecuteInnerFn =
-  fn(State) -> Result(#(Completion, State), frame.VmError)
+  fn(State) -> Result(#(Completion, State), state.VmError)
 
 pub type UnwindToCatchFn =
   fn(State, JsValue) -> Option(State)
@@ -67,7 +67,7 @@ pub fn call_native_generator_next(
           )
         }
         value.Executing -> {
-          frame.throw_type_error(state, "Generator is already running")
+          state.throw_type_error(state, "Generator is already running")
         }
         value.SuspendedStart | value.SuspendedYield -> {
           // Mark as executing
@@ -131,7 +131,7 @@ pub fn call_native_generator_next(
                 create_iterator_result(h3, state.builtins, yielded_value, False)
               Ok(
                 State(
-                  ..frame.merge_globals(state, suspended, []),
+                  ..state.merge_globals(state, suspended, []),
                   heap: h3,
                   stack: [result, ..rest_stack],
                   pc: state.pc + 1,
@@ -150,7 +150,7 @@ pub fn call_native_generator_next(
                 create_iterator_result(h3, state.builtins, return_value, True)
               Ok(
                 State(
-                  ..frame.merge_globals(state, final_state, []),
+                  ..state.merge_globals(state, final_state, []),
                   heap: h3,
                   stack: [result, ..rest_stack],
                   pc: state.pc + 1,
@@ -184,7 +184,7 @@ pub fn call_native_generator_next(
         }
       }
     None -> {
-      frame.throw_type_error(state, "not a generator object")
+      state.throw_type_error(state, "not a generator object")
     }
   }
 }
@@ -224,7 +224,7 @@ pub fn call_native_generator_return(
           )
         }
         value.Executing -> {
-          frame.throw_type_error(state, "Generator is already running")
+          state.throw_type_error(state, "Generator is already running")
         }
         value.SuspendedYield -> {
           // Full spec: resume with return completion so finally blocks run.
@@ -268,7 +268,7 @@ pub fn call_native_generator_return(
         }
       }
     None -> {
-      frame.throw_type_error(state, "not a generator object")
+      state.throw_type_error(state, "not a generator object")
     }
   }
 }
@@ -300,7 +300,7 @@ pub fn call_native_generator_throw(
           Error(#(Thrown, throw_val, h))
         }
         value.Executing -> {
-          frame.throw_type_error(state, "Generator is already running")
+          state.throw_type_error(state, "Generator is already running")
         }
         value.SuspendedYield -> {
           // Mark as executing
@@ -364,7 +364,7 @@ pub fn call_native_generator_throw(
                     )
                   Ok(
                     State(
-                      ..frame.merge_globals(state, suspended, []),
+                      ..state.merge_globals(state, suspended, []),
                       heap: h3,
                       stack: [result, ..rest_stack],
                       pc: state.pc + 1,
@@ -387,7 +387,7 @@ pub fn call_native_generator_throw(
                     )
                   Ok(
                     State(
-                      ..frame.merge_globals(state, final_state, []),
+                      ..state.merge_globals(state, final_state, []),
                       heap: h3,
                       stack: [result, ..rest_stack],
                       pc: state.pc + 1,
@@ -433,7 +433,7 @@ pub fn call_native_generator_throw(
         }
       }
     None -> {
-      frame.throw_type_error(state, "not a generator object")
+      state.throw_type_error(state, "not a generator object")
     }
   }
 }
@@ -447,7 +447,7 @@ type GenData {
     func_template: FuncTemplate,
     env_ref: Ref,
     saved_pc: Int,
-    saved_locals: array.Array(JsValue),
+    saved_locals: tuple_array.Array(JsValue),
     saved_stack: List(JsValue),
     saved_try_stack: List(value.SavedTryFrame),
     saved_finally_stack: List(value.SavedFinallyCompletion),
@@ -518,13 +518,13 @@ fn gen_with_state(
 /// try/finally handler (identified by EnterFinallyThrow at catch_target).
 /// Returns Some(#(catch_target, stack_depth, remaining_try_stack)) or None.
 fn find_next_finally(
-  code: array.Array(Op),
+  code: tuple_array.Array(Op),
   try_stack: List(TryFrame),
 ) -> Option(#(Int, Int, List(TryFrame))) {
   case try_stack {
     [] -> None
     [TryFrame(catch_target:, stack_depth:), ..rest] ->
-      case array.get(catch_target, code) {
+      case tuple_array.get(catch_target, code) {
         Some(EnterFinallyThrow) -> Some(#(catch_target, stack_depth, rest))
         _ -> find_next_finally(code, rest)
       }
@@ -578,7 +578,7 @@ fn process_generator_return(
           try_stack: remaining_try,
           stack: restored_stack,
           finally_stack: [
-            frame.ReturnCompletion(return_val),
+            state.ReturnCompletion(return_val),
             ..gen_state.finally_stack
           ],
           pc: catch_target + 1,
@@ -589,7 +589,7 @@ fn process_generator_return(
           // Continue processing any remaining outer finally blocks.
           let updated_gen_state =
             State(
-              ..frame.merge_globals(gen_state, final_state, []),
+              ..state.merge_globals(gen_state, final_state, []),
               heap: h2,
               try_stack: final_state.try_stack,
               finally_stack: final_state.finally_stack,
@@ -636,7 +636,7 @@ fn process_generator_return(
             )
           Ok(
             State(
-              ..frame.merge_globals(outer_state, suspended, []),
+              ..state.merge_globals(outer_state, suspended, []),
               heap: h3,
               stack: [result, ..rest_stack],
               pc: outer_state.pc + 1,
@@ -679,7 +679,7 @@ pub fn create_iterator_result(
           #("value", value.data_property(val)),
           #("done", value.data_property(JsBool(done))),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(builtins.object.prototype),
         symbol_properties: dict.new(),
         extensible: True,
@@ -718,25 +718,25 @@ pub fn restore_stacks(
   #(restored_try, restored_finally)
 }
 
-/// Convert frame.FinallyCompletion to value.SavedFinallyCompletion for storage.
+/// Convert state.FinallyCompletion to value.SavedFinallyCompletion for storage.
 fn convert_finally_completion(
   fc: FinallyCompletion,
 ) -> value.SavedFinallyCompletion {
   case fc {
-    frame.NormalCompletion -> value.SavedNormalCompletion
-    frame.ThrowCompletion(v) -> value.SavedThrowCompletion(v)
-    frame.ReturnCompletion(v) -> value.SavedReturnCompletion(v)
+    state.NormalCompletion -> value.SavedNormalCompletion
+    state.ThrowCompletion(v) -> value.SavedThrowCompletion(v)
+    state.ReturnCompletion(v) -> value.SavedReturnCompletion(v)
   }
 }
 
-/// Convert value.SavedFinallyCompletion back to frame.FinallyCompletion.
+/// Convert value.SavedFinallyCompletion back to state.FinallyCompletion.
 fn restore_finally_completion(
   sfc: value.SavedFinallyCompletion,
 ) -> FinallyCompletion {
   case sfc {
-    value.SavedNormalCompletion -> frame.NormalCompletion
-    value.SavedThrowCompletion(v) -> frame.ThrowCompletion(v)
-    value.SavedReturnCompletion(v) -> frame.ReturnCompletion(v)
+    value.SavedNormalCompletion -> state.NormalCompletion
+    value.SavedThrowCompletion(v) -> state.ThrowCompletion(v)
+    value.SavedReturnCompletion(v) -> state.ReturnCompletion(v)
   }
 }
 

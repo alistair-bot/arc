@@ -10,9 +10,9 @@
 /// elements in the collection.
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type MapKey, type MapNativeFn, type Ref, AccessorProperty,
   Dispatch, JsBool, JsNumber, JsObject, JsUndefined, MapConstructor, MapNative,
@@ -197,7 +197,7 @@ fn alloc_map(
     ObjectSlot(
       kind: MapObject(data:, keys:, original_keys:),
       properties: dict.new(),
-      elements: js_elements.new(),
+      elements: elements.new(),
       prototype: Some(proto),
       symbol_properties: dict.new(),
       extensible: True,
@@ -242,9 +242,9 @@ fn add_entries_from_iterable(
             original_keys,
           )
         None ->
-          frame.type_error(state, "Iterator value is not an entry-like object")
+          state.type_error(state, "Iterator value is not an entry-like object")
       }
-    _ -> frame.type_error(state, string.inspect(iterable) <> " is not iterable")
+    _ -> state.type_error(state, string.inspect(iterable) <> " is not iterable")
   }
 }
 
@@ -267,14 +267,14 @@ fn add_entries_loop(
       #(State(..state, heap:), Ok(JsObject(ref)))
     }
     False -> {
-      let entry = js_elements.get(elements, idx)
+      let entry = elements.get(elements, idx)
       // Each entry must be an array-like [key, value]
       case entry {
         JsObject(entry_ref) ->
           case heap.read_array(state.heap, entry_ref) {
             Some(#(_, entry_elems)) -> {
-              let key = js_elements.get(entry_elems, 0)
-              let val = js_elements.get(entry_elems, 1)
+              let key = elements.get(entry_elems, 0)
+              let val = elements.get(entry_elems, 1)
               let map_key = value.js_to_map_key(key)
               // If key already exists, update it (last write wins, but keep
               // insertion order position of first occurrence per spec)
@@ -297,7 +297,7 @@ fn add_entries_loop(
               )
             }
             None ->
-              frame.type_error(
+              state.type_error(
                 state,
                 "Iterator value "
                   <> int.to_string(idx)
@@ -305,7 +305,7 @@ fn add_entries_loop(
               )
           }
         _ ->
-          frame.type_error(
+          state.type_error(
             state,
             "Iterator value "
               <> int.to_string(idx)
@@ -510,7 +510,7 @@ fn map_for_each(
   // Step 3: If IsCallable(callbackfn) is false, throw TypeError
   case helpers.is_callable(state.heap, cb) {
     False ->
-      frame.type_error(
+      state.type_error(
         state,
         common.typeof_value(cb, state.heap) <> " is not a function",
       )
@@ -553,7 +553,7 @@ fn for_each_loop(
           let original_key =
             dict.get(original_keys, map_key) |> result.unwrap(JsUndefined)
           // Step 5a.i: Call(callbackfn, thisArg, « e.[[Value]], e.[[Key]], M »)
-          use _result, state <- frame.try_call(state, cb, this_arg, [
+          use _result, state <- state.try_call(state, cb, this_arg, [
             val,
             original_key,
             map_this,
@@ -621,13 +621,13 @@ fn require_map(
         Some(ObjectSlot(kind: MapObject(data:, keys:, original_keys:), ..)) ->
           cont(data, keys, original_keys, ref, state)
         _ ->
-          frame.type_error(
+          state.type_error(
             state,
             "Method Map.prototype.* called on incompatible receiver",
           )
       }
     _ ->
-      frame.type_error(
+      state.type_error(
         state,
         "Method Map.prototype.* called on incompatible receiver",
       )

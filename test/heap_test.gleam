@@ -1,6 +1,6 @@
-import arc/vm/array
 import arc/vm/heap
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/internal/tuple_array
 import arc/vm/value.{
   type FuncTemplate, ArrayObject, BigInt, BoxSlot, EnvSlot, Finite, FuncTemplate,
   FunctionObject, JsBigInt, JsNull, JsNumber, JsObject, JsString, JsSymbol,
@@ -15,9 +15,9 @@ fn dummy_template() -> FuncTemplate {
     name: None,
     arity: 0,
     local_count: 0,
-    bytecode: array.from_list([]),
-    constants: array.from_list([]),
-    functions: array.from_list([]),
+    bytecode: tuple_array.from_list([]),
+    constants: tuple_array.from_list([]),
+    functions: tuple_array.from_list([]),
     env_descriptors: [],
     is_strict: False,
     is_arrow: False,
@@ -32,7 +32,7 @@ fn ordinary(props: dict.Dict(String, value.JsValue)) {
     kind: OrdinaryObject,
     properties: dict.map_values(props, fn(_, v) { value.data_property(v) }),
     symbol_properties: dict.new(),
-    elements: js_elements.new(),
+    elements: elements.new(),
     prototype: None,
     extensible: True,
   )
@@ -211,7 +211,7 @@ pub fn gc_traces_through_array_slot_test() {
         kind: ArrayObject(3),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.from_list([
+        elements: elements.from_list([
           JsNumber(Finite(1.0)),
           JsObject(ref_inner),
           JsNull,
@@ -238,7 +238,7 @@ pub fn gc_traces_through_closure_slot_test() {
         kind: FunctionObject(func_template: dummy_template(), env: ref_env),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: None,
         extensible: True,
       ),
@@ -273,7 +273,7 @@ pub fn mixed_live_dead_partition_test() {
         kind: ArrayObject(1),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.from_list([JsNumber(Finite(1.0))]),
+        elements: elements.from_list([JsNumber(Finite(1.0))]),
         prototype: None,
         extensible: True,
       ),
@@ -289,7 +289,7 @@ pub fn mixed_live_dead_partition_test() {
         kind: FunctionObject(func_template: dummy_template(), env: live_env),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: None,
         extensible: True,
       ),
@@ -335,7 +335,7 @@ pub fn gc_traces_through_function_object_test() {
         kind: FunctionObject(func_template: dummy_template(), env: ref_env),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: None,
         extensible: True,
       ),
@@ -363,7 +363,7 @@ pub fn shared_env_both_closures_keep_it_alive_test() {
         kind: FunctionObject(func_template: dummy_template(), env: ref_env),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: None,
         extensible: True,
       ),
@@ -375,7 +375,7 @@ pub fn shared_env_both_closures_keep_it_alive_test() {
         kind: FunctionObject(func_template: dummy_template(), env: ref_env),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: None,
         extensible: True,
       ),
@@ -403,7 +403,7 @@ pub fn gc_traces_through_box_slot_test() {
         kind: FunctionObject(func_template: dummy_template(), env: ref_env),
         properties: dict.new(),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: None,
         extensible: True,
       ),

@@ -2,16 +2,16 @@
 // Public API for the VM — run scripts, modules, REPL sessions
 // ============================================================================
 
-import arc/vm/array
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/completion.{
   type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
 }
-import arc/vm/event_loop
-import arc/vm/execute
-import arc/vm/frame.{type State, type VmError, State}
+import arc/vm/exec/event_loop
+import arc/vm/exec/interpreter
 import arc/vm/heap.{type Heap}
+import arc/vm/internal/tuple_array
 import arc/vm/realm
+import arc/vm/state.{type State, type VmError, State}
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, JsObject, JsUndefined,
 }
@@ -26,7 +26,7 @@ import gleam/set
 
 /// Result of module evaluation -- includes locals for export extraction.
 pub type ModuleResult {
-  ModuleOk(value: JsValue, heap: Heap, locals: array.Array(JsValue))
+  ModuleOk(value: JsValue, heap: Heap, locals: tuple_array.Array(JsValue))
   ModuleThrow(value: JsValue, heap: Heap)
   ModuleError(error: VmError)
 }
@@ -60,8 +60,15 @@ pub fn run(
   event_loop: Bool,
 ) -> Result(Completion, VmError) {
   let result =
-    execute.init_state(func, heap, builtins, global_object, False, event_loop)
-    |> execute.execute_inner()
+    interpreter.init_state(
+      func,
+      heap,
+      builtins,
+      global_object,
+      False,
+      event_loop,
+    )
+    |> interpreter.execute_inner()
   use #(completion, final_state) <- result.try(result)
   let drained_state = event_loop.finish(final_state)
   case completion {
@@ -82,10 +89,10 @@ pub fn run_module_with_imports(
   import_globals: dict.Dict(String, JsValue),
   event_loop: Bool,
 ) -> ModuleResult {
-  let locals = array.repeat(JsUndefined, func.local_count)
+  let locals = tuple_array.repeat(JsUndefined, func.local_count)
   let state =
     State(
-      ..execute.new_state(
+      ..interpreter.new_state(
         func,
         locals,
         heap,
@@ -99,7 +106,7 @@ pub fn run_module_with_imports(
       ),
       this_binding: JsUndefined,
     )
-  let result = execute.execute_inner(state)
+  let result = interpreter.execute_inner(state)
   case result {
     Error(vm_err) -> ModuleError(error: vm_err)
     Ok(#(completion, final_state)) -> {
@@ -128,10 +135,10 @@ pub fn run_and_drain_repl(
   builtins: Builtins,
   env: ReplEnv,
 ) -> Result(#(Completion, ReplEnv), VmError) {
-  let locals = array.repeat(JsUndefined, func.local_count)
+  let locals = tuple_array.repeat(JsUndefined, func.local_count)
   let state =
     State(
-      ..execute.new_state(
+      ..interpreter.new_state(
         func,
         locals,
         heap,
@@ -145,7 +152,7 @@ pub fn run_and_drain_repl(
       ),
       realms: env.realms,
     )
-  use #(completion, final_state) <- result.try(execute.execute_inner(state))
+  use #(completion, final_state) <- result.try(interpreter.execute_inner(state))
   let drained_state = event_loop.drain_jobs(final_state)
   let new_env =
     ReplEnv(

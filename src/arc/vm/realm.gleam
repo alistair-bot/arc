@@ -1,15 +1,15 @@
 import arc/compiler
 import arc/parser
-import arc/vm/array
 import arc/vm/builtins
 import arc/vm/builtins/arc as builtins_arc
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/completion.{NormalCompletion, ThrowCompletion, YieldCompletion}
-import arc/vm/event_loop
-import arc/vm/frame.{type State, type StepResult, type VmError, State}
+import arc/vm/exec/event_loop
 import arc/vm/heap
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/internal/tuple_array
+import arc/vm/ops/object
+import arc/vm/state.{type State, type StepResult, type VmError, State}
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, DataProperty, JsObject, JsUndefined,
   ObjectSlot, OrdinaryObject,
@@ -35,7 +35,7 @@ pub type CallNativeFn =
 pub type NewStateFn =
   fn(
     FuncTemplate,
-    array.Array(JsValue),
+    tuple_array.Array(JsValue),
     heap.Heap,
     Builtins,
     Ref,
@@ -130,7 +130,7 @@ pub fn arc_spawn(
 
   case result {
     Ok(ret) -> ret
-    Error(msg) -> frame.type_error(state, msg)
+    Error(msg) -> state.type_error(state, msg)
   }
 }
 
@@ -157,7 +157,7 @@ fn run_spawned_closure(
   let padded_args = list.repeat(JsUndefined, callee_template.arity)
   let locals =
     list.flatten([env_values, padded_args, list.repeat(JsUndefined, remaining)])
-    |> array.from_list
+    |> tuple_array.from_list
 
   let state =
     new_state_fn(
@@ -199,7 +199,7 @@ fn run_spawned_native(
   call_native: CallNativeFn,
   new_state_fn: NewStateFn,
 ) -> Nil {
-  let locals = array.repeat(JsUndefined, caller_func.local_count)
+  let locals = tuple_array.repeat(JsUndefined, caller_func.local_count)
   let state =
     new_state_fn(
       caller_func,
@@ -240,7 +240,7 @@ pub fn eval_script_native(
     [s, ..] -> s
     [] -> JsUndefined
   }
-  use source_str, state <- frame.try_to_string(state, source)
+  use source_str, state <- state.try_to_string(state, source)
 
   // Read the __realm__ property from the $262 object to find the realm
   let realm_result = case this {
@@ -276,7 +276,7 @@ pub fn eval_script_native(
   }
 
   case realm_result {
-    Error(msg) -> frame.type_error(state, msg)
+    Error(msg) -> state.type_error(state, msg)
     Ok(#(
       realm_builtins,
       realm_global,
@@ -308,7 +308,7 @@ pub fn eval_script_native(
               #(State(..state, heap: h), Error(syntax_err))
             }
             Ok(template) -> {
-              let locals = array.repeat(JsUndefined, template.local_count)
+              let locals = tuple_array.repeat(JsUndefined, template.local_count)
               let eval_state =
                 State(
                   ..new_state_fn(
@@ -328,7 +328,7 @@ pub fn eval_script_native(
                 )
               case execute_inner(eval_state) {
                 Error(vm_err) ->
-                  frame.type_error(
+                  state.type_error(
                     state,
                     "evalScript: VM error: " <> string.inspect(vm_err),
                   )
@@ -359,7 +359,7 @@ pub fn eval_script_native(
                     NormalCompletion(val, _) -> #(state, Ok(val))
                     ThrowCompletion(thrown, _) -> #(state, Error(thrown))
                     YieldCompletion(_, _) ->
-                      frame.type_error(state, "evalScript: unexpected yield")
+                      state.type_error(state, "evalScript: unexpected yield")
                   }
                 }
               }
@@ -455,7 +455,7 @@ pub fn build_262(
           ),
         ]),
         symbol_properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(b.object.prototype),
         extensible: True,
       ),

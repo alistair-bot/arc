@@ -1,8 +1,8 @@
-import arc/vm/coerce
-import arc/vm/frame.{type State, State}
 import arc/vm/heap
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/ops/coerce
+import arc/vm/ops/object
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, ArrayObject, Finite, JsNumber, JsObject, JsString, JsUndefined,
   ObjectSlot,
@@ -35,7 +35,7 @@ pub fn get_elem_value(
           case heap.read(state.heap, ref) {
             Some(ObjectSlot(kind: ArrayObject(length:), elements:, ..)) ->
               case idx < length {
-                True -> Ok(#(js_elements.get(elements, idx), state))
+                True -> Ok(#(elements.get(elements, idx), state))
                 False -> Ok(#(JsUndefined, state))
               }
             Some(ObjectSlot(
@@ -44,7 +44,7 @@ pub fn get_elem_value(
               prototype:,
               ..,
             )) ->
-              case js_elements.get_option(elements, idx) {
+              case elements.get_option(elements, idx) {
                 Some(v) -> Ok(#(v, state))
                 None ->
                   case prototype {
@@ -114,7 +114,7 @@ pub fn put_elem_value(
                   state
                 }
                 True -> {
-                  let new_elements = js_elements.set(elements, idx, val)
+                  let new_elements = elements.set(elements, idx, val)
                   let new_length = case idx >= length {
                     True -> idx + 1
                     False -> length
@@ -150,7 +150,7 @@ pub fn put_elem_value(
                   ObjectSlot(
                     kind: args_kind,
                     properties:,
-                    elements: js_elements.set(elements, idx, val),
+                    elements: elements.set(elements, idx, val),
                     prototype:,
                     symbol_properties:,
                     extensible:,

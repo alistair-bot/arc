@@ -1,9 +1,9 @@
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers.{first_arg}
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/ops/object
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsElements, type JsValue, type ObjectNativeFn, type Ref, AccessorProperty,
   ArrayObject, DataProperty, Dispatch, FunctionObject, GeneratorObject, JsBool,
@@ -190,7 +190,7 @@ pub fn call_native(
             kind: OrdinaryObject,
             properties: dict.new(),
             symbol_properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(object_proto),
             extensible: True,
           ),
@@ -221,7 +221,7 @@ pub fn get_own_property_descriptor(
     JsObject(ref) -> {
       // Step 2: Let key be ? ToPropertyKey(P).
       // (We use ToString here; spec uses ToPropertyKey which also handles Symbols.)
-      use key_str, state <- frame.try_to_string(state, key_val)
+      use key_str, state <- state.try_to_string(state, key_val)
       // Step 3: Let desc be ? obj.[[GetOwnProperty]](key).
       case object.get_own_property(state.heap, ref, key_str) {
         Some(prop) -> {
@@ -236,10 +236,10 @@ pub fn get_own_property_descriptor(
       }
     }
     // Step 1: ToObject throws TypeError for null/undefined.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // String primitives: index properties + "length" are own properties.
     JsString(s) -> {
-      use key_str, state <- frame.try_to_string(state, key_val)
+      use key_str, state <- state.try_to_string(state, key_val)
       let len = string.length(s)
       case key_str == "length" {
         True -> {
@@ -320,7 +320,7 @@ fn make_descriptor_object(
             #("configurable", value.data_property(JsBool(configurable))),
           ]),
           symbol_properties: dict.new(),
-          elements: js_elements.new(),
+          elements: elements.new(),
           prototype: Some(object_proto),
           extensible: True,
         ),
@@ -346,7 +346,7 @@ fn make_descriptor_object(
             #("configurable", value.data_property(JsBool(configurable))),
           ]),
           symbol_properties: dict.new(),
-          elements: js_elements.new(),
+          elements: elements.new(),
           prototype: Some(object_proto),
           extensible: True,
         ),
@@ -371,10 +371,10 @@ pub fn define_property(
     [JsObject(ref) as obj, key_val, JsObject(desc_ref), ..] -> {
       // Step 2: Let key be ? ToPropertyKey(P).
       // (Uses ToString; spec uses ToPropertyKey which also handles Symbols.)
-      use key_str, state <- frame.try_to_string(state, key_val)
+      use key_str, state <- state.try_to_string(state, key_val)
       // Steps 3-4: ToPropertyDescriptor + DefinePropertyOrThrow
       // (apply_descriptor combines both steps.)
-      use state <- frame.try_state(apply_descriptor(
+      use state <- state.try_state(apply_descriptor(
         state,
         ref,
         key_str,
@@ -386,9 +386,9 @@ pub fn define_property(
     // Step 3 (implicit): Attributes is not an Object — TypeError.
     // Spec: ToPropertyDescriptor step 1 throws if Type(Obj) is not Object.
     [JsObject(_), _, ..] ->
-      frame.type_error(state, "Property description must be an object")
+      state.type_error(state, "Property description must be an object")
     // Step 1: If O is not an Object, throw a TypeError.
-    _ -> frame.type_error(state, "Object.defineProperty called on non-object")
+    _ -> state.type_error(state, "Object.defineProperty called on non-object")
   }
 }
 
@@ -867,7 +867,7 @@ fn own_keys_impl(
       #(State(..state, heap:), Ok(JsObject(arr_ref)))
     }
     // Step 1: ToObject — null/undefined throw TypeError
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // String primitives: own keys are index chars + "length"
     JsString(s) -> {
       let len = string.length(s)
@@ -972,7 +972,7 @@ fn collect_index_keys(
   case idx >= length {
     True -> list.reverse(acc)
     False ->
-      case js_elements.has(elements, idx) {
+      case elements.has(elements, idx) {
         True ->
           collect_index_keys(elements, idx + 1, length, [
             int.to_string(idx),
@@ -1036,7 +1036,7 @@ pub fn has_own_property(
     [] -> JsUndefined
   }
   // Step 1: Let P be ? ToPropertyKey(V).
-  use key_str, state <- frame.try_to_string(state, key_val)
+  use key_str, state <- state.try_to_string(state, key_val)
   case this {
     // Step 2: Let O be ? ToObject(this value).
     // Step 3: Return ? HasOwnProperty(O, P).
@@ -1048,7 +1048,7 @@ pub fn has_own_property(
       #(state, Ok(result))
     }
     // Step 2: ToObject throws TypeError on null/undefined.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // String primitives: own keys are index chars + "length"
     JsString(s) -> {
       let len = string.length(s)
@@ -1087,7 +1087,7 @@ pub fn property_is_enumerable(
     [] -> JsUndefined
   }
   // Step 1: Let P be ? ToPropertyKey(V).
-  use key_str, state <- frame.try_to_string(state, key_val)
+  use key_str, state <- state.try_to_string(state, key_val)
   case this {
     JsObject(ref) -> {
       // Step 2: Let O be ? ToObject(this value).
@@ -1102,7 +1102,7 @@ pub fn property_is_enumerable(
       #(state, Ok(result))
     }
     // Step 2: ToObject throws TypeError on null/undefined.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // String primitives: index properties are own+enumerable.
     // "length" is own but non-enumerable.
     JsString(s) -> {
@@ -1263,7 +1263,7 @@ pub fn object_value_of(
   // Step 1: Return ? ToObject(this value).
   // ToObject throws TypeError on null/undefined.
   case this {
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     _ -> #(state, Ok(this))
   }
 }
@@ -1349,13 +1349,13 @@ fn own_values_impl(
       // (filtered to enumerable-only string keys)
       let ks = collect_own_keys(state.heap, ref, True)
       // §7.3.23 step 3: For each key, Get(O, key) and collect
-      use vals, state <- frame.try_op(
+      use vals, state <- state.try_op(
         collect_values(state, ref, receiver, ks, []),
       )
       cont(list.reverse(vals), state)
     }
     // ToObject: null/undefined → TypeError
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // String primitives: enumerable own properties are the index characters.
     // §7.1.18: ToObject(String) creates a String wrapper whose own enumerable
     // string-keyed properties are the individual characters at indices 0..len-1.
@@ -1417,13 +1417,13 @@ fn own_entries_impl(
       // §7.3.23 step 1: ownKeys (filtered to enumerable string keys)
       let ks = collect_own_keys(state.heap, ref, True)
       // §7.3.23 step 3: collect key+value pairs
-      use pairs, state <- frame.try_op(
+      use pairs, state <- state.try_op(
         collect_entries(state, ref, receiver, ks, []),
       )
       cont(list.reverse(pairs), state)
     }
     // ToObject: null/undefined → TypeError
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // String primitives: enumerable own properties are the index characters.
     // §7.1.18: ToObject(String) creates a String wrapper whose own enumerable
     // string-keyed properties are the individual characters at indices 0..len-1.
@@ -1490,7 +1490,7 @@ pub fn create(
   }
   case proto {
     Error(Nil) ->
-      frame.type_error(state, "Object prototype may only be an Object or null")
+      state.type_error(state, "Object prototype may only be an Object or null")
     Ok(prototype) -> {
       // Step 2: Let obj be OrdinaryObjectCreate(O).
       let #(heap, ref) =
@@ -1500,7 +1500,7 @@ pub fn create(
             kind: OrdinaryObject,
             properties: dict.new(),
             symbol_properties: dict.new(),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype:,
             extensible: True,
           ),
@@ -1536,7 +1536,7 @@ pub fn define_properties(
   case target {
     // Step 2: Return ? ObjectDefineProperties(O, Properties).
     JsObject(target_ref) -> define_properties_on(state, target_ref, props_val)
-    _ -> frame.type_error(state, "Object.defineProperties called on non-object")
+    _ -> state.type_error(state, "Object.defineProperties called on non-object")
   }
 }
 
@@ -1568,7 +1568,7 @@ fn define_properties_on(
       define_props_loop(state, target_ref, props_ref, ks)
     }
     // Step 1: ToObject throws TypeError on null/undefined.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // Step 1: ToObject on primitives → wrapper with no own enumerable props → no-op.
     _ -> #(state, Ok(JsObject(target_ref)))
   }
@@ -1599,7 +1599,7 @@ fn define_props_loop(
         // Steps 4.b.i + 4.b.ii: descObj is an Object → ToPropertyDescriptor.
         Some(DataProperty(value: JsObject(desc_ref), ..)) -> {
           // Step 5.a: DefinePropertyOrThrow(O, key, desc).
-          use state <- frame.try_state(apply_descriptor(
+          use state <- state.try_state(apply_descriptor(
             state,
             target_ref,
             key,
@@ -1609,7 +1609,7 @@ fn define_props_loop(
         }
         // Step 4.b.ii: ToPropertyDescriptor throws if descObj is not an Object.
         Some(_) ->
-          frame.type_error(state, "Property description must be an object")
+          state.type_error(state, "Property description must be an object")
         // Step 4.a: propDesc is undefined → skip (key has no own property).
         None -> define_props_loop(state, target_ref, props_ref, rest)
       }
@@ -1638,16 +1638,16 @@ pub fn assign(
   case args {
     // Step 1: ToObject throws TypeError on null/undefined.
     [] | [JsNull, ..] | [JsUndefined, ..] ->
-      frame.type_error(state, cannot_convert)
+      state.type_error(state, cannot_convert)
     [target, ..sources] -> {
       // Step 1: Let to be ? ToObject(target).
       // For Objects: identity. For primitives: create a wrapper object.
       case common.to_object(state.heap, state.builtins, target) {
-        None -> frame.type_error(state, cannot_convert)
+        None -> state.type_error(state, cannot_convert)
         Some(#(heap, target_ref)) -> {
           let state = State(..state, heap:)
           // Steps 3-4: Process each source, then return to.
-          use state <- frame.try_state(assign_sources(
+          use state <- state.try_state(assign_sources(
             state,
             target_ref,
             sources,
@@ -1905,7 +1905,7 @@ pub fn has_own(
     JsObject(ref) -> {
       // Step 1: ToObject(O) — identity for objects.
       // Step 2: Let key be ? ToPropertyKey(P).
-      use key_str, state <- frame.try_to_string(state, key_val)
+      use key_str, state <- state.try_to_string(state, key_val)
       // Step 3: Return ? HasOwnProperty(obj, key).
       let result = case object.get_own_property(state.heap, ref, key_str) {
         Some(_) -> JsBool(True)
@@ -1914,10 +1914,10 @@ pub fn has_own(
       #(state, Ok(result))
     }
     // Step 1: ToObject throws TypeError on null/undefined.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // String primitives: own keys are index chars + "length"
     JsString(s) -> {
-      use key_str, state <- frame.try_to_string(state, key_val)
+      use key_str, state <- state.try_to_string(state, key_val)
       let len = string.length(s)
       let result = case key_str == "length" {
         True -> JsBool(True)
@@ -1957,7 +1957,7 @@ pub fn get_prototype_of(
       #(state, Ok(proto))
     }
     // Step 1: ToObject (§7.1.18) — null/undefined throw TypeError.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     // Step 1 cont: ToObject on primitives — return the wrapper's prototype.
     // §7.1.18: Number → NumberObject, String → StringObject, Boolean → BooleanObject
     // We skip allocating a wrapper and return the prototype directly.
@@ -2011,10 +2011,10 @@ pub fn set_prototype_of(
   }
   case target, proto {
     // §20.1.2.21 step 1: RequireObjectCoercible — null/undefined throw TypeError.
-    JsNull, _ | JsUndefined, _ -> frame.type_error(state, cannot_convert)
+    JsNull, _ | JsUndefined, _ -> state.type_error(state, cannot_convert)
     _, Error(_) ->
       // §20.1.2.21 step 2: proto is not Object or null.
-      frame.type_error(state, "Object prototype may only be an Object or null")
+      state.type_error(state, "Object prototype may only be an Object or null")
     JsObject(ref), Ok(new_proto) ->
       // §20.1.2.21 step 4: O.[[SetPrototypeOf]](proto)
       // OrdinarySetPrototypeOf §10.1.2.1:
@@ -2029,7 +2029,7 @@ pub fn set_prototype_of(
               // §10.1.2.1 step 4: If extensible is false, return false.
               case extensible {
                 False ->
-                  frame.type_error(
+                  state.type_error(
                     state,
                     "Cannot set prototype of a non-extensible object",
                   )
@@ -2037,7 +2037,7 @@ pub fn set_prototype_of(
                   // §10.1.2.1 step 7: cycle detection
                   case would_create_cycle(state.heap, ref, new_proto) {
                     // §20.1.2.21 step 5: status is false → throw TypeError.
-                    True -> frame.type_error(state, "Cyclic __proto__ value")
+                    True -> state.type_error(state, "Cyclic __proto__ value")
                     False -> {
                       // §10.1.2.1 step 8: Set O.[[Prototype]] to V.
                       let heap = {
@@ -2412,20 +2412,20 @@ pub fn from_entries(
   let target = first_arg(args)
   case target {
     // Step 1: RequireObjectCoercible — null/undefined throw TypeError.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     JsObject(ref) -> {
       // Read the source array/iterable
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: ArrayObject(..), elements:, ..)) -> {
           // Iterate over array elements to build object properties.
           // Use a list accumulator to preserve insertion order.
-          let entry_values = js_elements.values(elements)
+          let entry_values = elements.values(elements)
           from_entries_loop(entry_values, state, [], dict.new())
         }
-        _ -> frame.type_error(state, "Object.fromEntries requires an iterable")
+        _ -> state.type_error(state, "Object.fromEntries requires an iterable")
       }
     }
-    _ -> frame.type_error(state, "Object.fromEntries requires an iterable")
+    _ -> state.type_error(state, "Object.fromEntries requires an iterable")
   }
 }
 
@@ -2456,7 +2456,7 @@ fn from_entries_loop(
             kind: OrdinaryObject,
             properties: props,
             symbol_properties: sym_acc,
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(state.builtins.object.prototype),
             extensible: True,
           ),
@@ -2479,7 +2479,7 @@ fn from_entries_loop(
           )
         _ -> {
           // ToPropertyKey via ToString for non-symbol keys.
-          use key_str, state <- frame.try_to_string(state, key_val)
+          use key_str, state <- state.try_to_string(state, key_val)
           from_entries_loop(
             rest,
             state,
@@ -2489,7 +2489,7 @@ fn from_entries_loop(
         }
       }
     }
-    [_, ..] -> frame.type_error(state, "Iterator value is not an entry object")
+    [_, ..] -> state.type_error(state, "Iterator value is not an entry object")
   }
 }
 
@@ -2510,7 +2510,7 @@ pub fn get_own_property_descriptors(
   let object_proto = state.builtins.object.prototype
   let target = first_arg(args)
   case target {
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     JsObject(ref) -> {
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(properties:, ..)) -> {
@@ -2531,7 +2531,7 @@ pub fn get_own_property_descriptors(
                 kind: OrdinaryObject,
                 properties: desc_props,
                 symbol_properties: dict.new(),
-                elements: js_elements.new(),
+                elements: elements.new(),
                 prototype: Some(object_proto),
                 extensible: True,
               ),
@@ -2565,7 +2565,7 @@ pub fn get_own_property_symbols(
   let array_proto = state.builtins.array.prototype
   case first_arg(args) {
     // Step 1: ToObject — null/undefined throw TypeError.
-    JsNull | JsUndefined -> frame.type_error(state, cannot_convert)
+    JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     JsObject(ref) -> {
       // Step 4: Collect own symbol keys.
       let syms = collect_own_symbol_keys(state.heap, ref, False)
@@ -2631,15 +2631,15 @@ fn object_to_locale_string(
       use to_string_fn, state <- try_get(state, ref, "toString", this)
       case helpers.is_callable(state.heap, to_string_fn) {
         True -> {
-          use result, state <- frame.try_call(state, to_string_fn, this, [])
+          use result, state <- state.try_call(state, to_string_fn, this, [])
           #(state, Ok(result))
         }
         False ->
-          frame.type_error(state, "toLocaleString: toString is not callable")
+          state.type_error(state, "toLocaleString: toString is not callable")
       }
     }
     _ -> {
-      use s, state <- frame.try_to_string(state, this)
+      use s, state <- state.try_to_string(state, this)
       #(state, Ok(JsString(s)))
     }
   }
@@ -2656,7 +2656,7 @@ fn group_by(
     _ -> JsUndefined
   }
   case helpers.is_callable(state.heap, callback) {
-    False -> frame.type_error(state, "Object.groupBy callback is not callable")
+    False -> state.type_error(state, "Object.groupBy callback is not callable")
     True -> {
       // Get elements from iterable
       case items {
@@ -2667,9 +2667,9 @@ fn group_by(
               group_by_loop(state, elems, callback, 0, dict.new())
             }
             None ->
-              frame.type_error(state, "Object.groupBy: items is not iterable")
+              state.type_error(state, "Object.groupBy: items is not iterable")
           }
-        _ -> frame.type_error(state, "Object.groupBy: items is not iterable")
+        _ -> state.type_error(state, "Object.groupBy: items is not iterable")
       }
     }
   }
@@ -2703,7 +2703,7 @@ fn group_by_loop(
           ObjectSlot(
             kind: OrdinaryObject,
             properties: dict.from_list(props),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: None,
             symbol_properties: dict.new(),
             extensible: True,
@@ -2712,11 +2712,11 @@ fn group_by_loop(
       #(State(..state, heap:), Ok(JsObject(obj_ref)))
     }
     [item, ..rest] -> {
-      use key_val, state <- frame.try_call(state, callback, JsUndefined, [
+      use key_val, state <- state.try_call(state, callback, JsUndefined, [
         item,
         value.JsNumber(value.Finite(int.to_float(index))),
       ])
-      use key, state <- frame.try_to_string(state, key_val)
+      use key, state <- state.try_to_string(state, key_val)
       let current = dict.get(groups, key) |> result.unwrap([])
       let groups = dict.insert(groups, key, [item, ..current])
       group_by_loop(state, rest, callback, index + 1, groups)
@@ -2734,7 +2734,7 @@ fn extract_elements(
   case idx >= length {
     True -> list.reverse(acc)
     False -> {
-      let val = js_elements.get(elements, idx)
+      let val = elements.get(elements, idx)
       extract_elements(elements, idx + 1, length, [val, ..acc])
     }
   }

@@ -1,7 +1,7 @@
 import arc/vm/builtins/common
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type JsonNativeFn, type Property, type Ref, ArrayObject,
   DataProperty, Finite, FunctionObject, JsBool, JsNull, JsNumber, JsObject,
@@ -46,7 +46,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       ObjectSlot(
         kind: OrdinaryObject,
         properties:,
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(object_proto),
         symbol_properties:,
         extensible: True,
@@ -94,11 +94,11 @@ fn json_parse(
   // Step 1: ToString(text)
   let to_string_result = case args {
     [JsString(s), ..] -> Ok(#(s, state))
-    [other, ..] -> frame.to_string(state, other)
+    [other, ..] -> state.to_string(state, other)
     [] -> Ok(#("undefined", state))
   }
 
-  use json_str, state <- frame.try_op(to_string_result)
+  use json_str, state <- state.try_op(to_string_result)
   // Step 2: Parse as JSON text
   let chars = string.to_graphemes(json_str)
   case parse_value(chars) {
@@ -439,7 +439,7 @@ fn materialize(h: Heap, b: common.Builtins, val: JsonValue) -> #(Heap, JsValue) 
           ObjectSlot(
             kind: OrdinaryObject,
             properties: dict.from_list(props),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(b.object.prototype),
             symbol_properties: dict.new(),
             extensible: True,
@@ -628,7 +628,7 @@ fn stringify_array(
   case idx >= length {
     True -> Ok(Some("[" <> string.join(list.reverse(acc), ",") <> "]"))
     False -> {
-      let elem = js_elements.get(elements, idx)
+      let elem = elements.get(elements, idx)
       case stringify_value(h, elem, seen) {
         Ok(Some(s)) ->
           stringify_array(h, elements, length, idx + 1, seen, [s, ..acc])

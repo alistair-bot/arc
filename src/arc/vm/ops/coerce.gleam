@@ -1,7 +1,7 @@
 import arc/vm/builtins/common
-import arc/vm/frame.{type State, State}
 import arc/vm/heap
-import arc/vm/object
+import arc/vm/ops/object
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, BigInt, Finite, FunctionObject, Infinity, JsBigInt, JsBool,
   JsNull, JsNumber, JsObject, JsString, JsSymbol, JsUndefined, JsUninitialized,
@@ -60,7 +60,7 @@ pub fn to_primitive(
                 DefaultHint -> "default"
               }
               use #(result, new_state) <- result.try(
-                frame.call(state, exotic_fn, val, [JsString(hint_str)]),
+                state.call(state, exotic_fn, val, [JsString(hint_str)]),
               )
               case result {
                 JsObject(_) ->
@@ -107,7 +107,7 @@ fn try_to_primitive_methods(
       case is_callable_value(state.heap, method) {
         True -> {
           use #(result, new_state) <- result.try(
-            frame.call(state, method, val, []),
+            state.call(state, method, val, []),
           )
           case result {
             JsObject(_) -> try_to_primitive_methods(new_state, val, ref, rest)

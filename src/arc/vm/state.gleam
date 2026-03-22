@@ -1,6 +1,6 @@
-import arc/vm/array.{type Array}
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/heap.{type Heap}
+import arc/vm/internal/tuple_array.{type Array}
 import arc/vm/opcode.{type Op}
 import arc/vm/value.{type FuncTemplate, type JsValue, type Ref}
 import gleam/dict
@@ -168,7 +168,7 @@ pub fn to_string(
 }
 
 /// Convert a value to string or propagate error. Use with `use` syntax:
-///   use str, state <- frame.try_to_string(state, val)
+///   use str, state <- state.try_to_string(state, val)
 pub fn try_to_string(
   state: State,
   val: JsValue,
@@ -192,7 +192,7 @@ pub fn call(
 }
 
 /// Call a function or propagate thrown error. Use with `use` syntax:
-///   use result, state <- frame.try_call(state, callback, this_arg, [element, idx, arr])
+///   use result, state <- state.try_call(state, callback, this_arg, [element, idx, arr])
 pub fn try_call(
   state: State,
   callee: JsValue,
@@ -208,7 +208,7 @@ pub fn try_call(
 
 /// Generic CPS helper for any fallible state operation returning
 /// `Result(#(a, State), #(JsValue, State))`. Use with `use` syntax:
-///   use val, state <- frame.try_op(some_operation(state, ...))
+///   use val, state <- state.try_op(some_operation(state, ...))
 /// Polymorphic in both the unwrapped value type and the continuation's result
 /// type, so it works in loops returning non-JsValue results too.
 pub fn try_op(
@@ -223,7 +223,7 @@ pub fn try_op(
 
 /// CPS helper for fallible state operations that return only an updated State
 /// (no extra value). Use with `use` syntax:
-///   use state <- frame.try_state(some_operation(state, ...))
+///   use state <- state.try_state(some_operation(state, ...))
 pub fn try_state(
   result: Result(State, #(JsValue, State)),
   cont: fn(State) -> #(State, Result(b, JsValue)),

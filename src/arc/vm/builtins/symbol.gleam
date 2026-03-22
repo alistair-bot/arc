@@ -5,7 +5,7 @@
 /// are exposed as static properties on the Symbol function object.
 import arc/vm/builtins/common
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
 import arc/vm/value.{
   type JsValue, type Ref, Call, JsObject, JsString, JsSymbol, NativeFunction,
   ObjectSlot, SymbolConstructor, SymbolFor, SymbolKeyFor,
@@ -26,7 +26,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
           #("name", common.fn_name_property("for")),
           #("length", common.fn_length_property(1)),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -41,7 +41,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
           #("name", common.fn_name_property("keyFor")),
           #("length", common.fn_length_property(1)),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -79,7 +79,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
           #("dispose", value.data(JsSymbol(value.symbol_dispose))),
           #("asyncDispose", value.data(JsSymbol(value.symbol_async_dispose))),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
         extensible: True,

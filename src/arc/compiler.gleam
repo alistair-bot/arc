@@ -1,6 +1,6 @@
 /// Bytecode Compiler
 ///
-/// Translates a parsed AST into a FuncTemplate that the VM can execute.
+/// Translates a parsed AST into a FuncTemplate that the VM can interpreter.
 /// Three-phase pipeline:
 ///   Phase 1 (emit): AST → EmitterOp (symbolic names + label IDs)
 ///   Phase 2 (scope): EmitterOp → IrOp (resolved local indices + label IDs)
@@ -34,7 +34,7 @@ pub type CompileError {
   Unsupported(description: String)
 }
 
-/// Compile a parsed program into a FuncTemplate the VM can execute.
+/// Compile a parsed program into a FuncTemplate the VM can interpreter.
 pub fn compile(program: ast.Program) -> Result(FuncTemplate, CompileError) {
   case program {
     ast.Script(body) -> compile_script(body, emit.emit_program)

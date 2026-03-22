@@ -1,9 +1,9 @@
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers
-import arc/vm/frame
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
-import arc/vm/object
+import arc/vm/internal/elements
+import arc/vm/ops/object
+import arc/vm/state
 import arc/vm/value.{
   type Job, type JsValue, type Ref, BoxSlot, Call, JsBool, JsObject,
   NativeFunction, ObjectSlot, PromiseCatch, PromiseConstructor, PromiseFinally,
@@ -110,7 +110,7 @@ pub fn create_promise(h: Heap, promise_proto: Ref) -> #(Heap, Ref, Ref) {
       ObjectSlot(
         kind: PromiseObject(promise_data: data_ref),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(promise_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -166,7 +166,7 @@ pub fn create_resolving_functions(
           #("name", common.fn_name_property("")),
           #("length", common.fn_length_property(1)),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -189,7 +189,7 @@ pub fn create_resolving_functions(
           #("name", common.fn_name_property("")),
           #("length", common.fn_length_property(1)),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -278,10 +278,10 @@ pub fn fulfill_promise(
 /// Step 7: HostPromiseRejectionTracker — tracks unhandled rejections on State.
 /// Step 8 jobs are appended to state.job_queue.
 pub fn reject_promise(
-  state: frame.State,
+  state: state.State,
   data_ref: Ref,
   reason: JsValue,
-) -> frame.State {
+) -> state.State {
   case heap.read(state.heap, data_ref) {
     Some(PromiseSlot(
       state: value.PromisePending,
@@ -316,7 +316,7 @@ pub fn reject_promise(
         False -> [data_ref, ..state.unhandled_rejections]
         True -> state.unhandled_rejections
       }
-      frame.State(
+      state.State(
         ..state,
         heap: h,
         job_queue: list.append(state.job_queue, jobs),
@@ -367,13 +367,13 @@ pub fn reject_promise(
 /// Step 8c: HostPromiseRejectionTracker — untracks previously-unhandled
 /// rejections on State when a handler is attached.
 pub fn perform_promise_then(
-  state: frame.State,
+  state: state.State,
   data_ref: Ref,
   on_fulfilled: JsValue,
   on_rejected: JsValue,
   child_resolve: JsValue,
   child_reject: JsValue,
-) -> frame.State {
+) -> state.State {
   let h = state.heap
   // §27.2.5.4 steps 3-4: If IsCallable(onFulfilled/onRejected) is false,
   // set to undefined. We use sentinel values instead of the spec's "empty".
@@ -412,14 +412,14 @@ pub fn perform_promise_then(
             is_handled: True,
           ),
         )
-      frame.State(..state, heap: h)
+      state.State(..state, heap: h)
     }
     // Step 7: Else if promise.[[PromiseState]] is fulfilled
     Some(PromiseSlot(state: value.PromiseFulfilled(val), ..)) -> {
       // Step 9: Set [[PromiseIsHandled]] to true
       let h = mark_handled(h, data_ref)
       // Step 7b-c: NewPromiseReactionJob + HostEnqueuePromiseJob
-      frame.State(
+      state.State(
         ..state,
         heap: h,
         job_queue: list.append(state.job_queue, [
@@ -443,7 +443,7 @@ pub fn perform_promise_then(
         True -> state.unhandled_rejections
       }
       // Step 8d-e: NewPromiseReactionJob + HostEnqueuePromiseJob
-      frame.State(
+      state.State(
         ..state,
         heap: h,
         job_queue: list.append(state.job_queue, [
@@ -514,9 +514,9 @@ pub fn get_data_ref(h: Heap, promise_ref: Ref) -> Option(Ref) {
 ///   Error(#(None, state)) — not an object (step 8) or then not callable (step 12)
 ///   Error(#(Some(thrown), state)) — Get(resolution, "then") threw (step 10)
 pub fn get_thenable_then(
-  state: frame.State,
+  state: state.State,
   val: JsValue,
-) -> Result(#(JsValue, frame.State), #(option.Option(JsValue), frame.State)) {
+) -> Result(#(JsValue, state.State), #(option.Option(JsValue), state.State)) {
   case val {
     // Step 8: If resolution is not an Object -> Error(None) (caller fulfills)
     JsObject(ref) ->

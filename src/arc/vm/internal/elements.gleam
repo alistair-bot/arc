@@ -2,7 +2,7 @@
 ///
 /// The type itself is defined in `arc/vm/value` (to avoid import cycles).
 /// This module provides all operations: new, from_list, get, set, delete, etc.
-import arc/vm/array
+import arc/vm/internal/tuple_array
 import arc/vm/value.{
   type JsElements, type JsValue, DenseElements, JsUndefined, SparseElements,
 }
@@ -15,12 +15,12 @@ const max_gap = 1024
 
 /// Empty elements (for non-array objects and empty arrays).
 pub fn new() -> JsElements {
-  DenseElements(array.from_list([]))
+  DenseElements(tuple_array.from_list([]))
 }
 
 /// Build dense elements from a list of values.
 pub fn from_list(items: List(JsValue)) -> JsElements {
-  DenseElements(array.from_list(items))
+  DenseElements(tuple_array.from_list(items))
 }
 
 /// Build sparse elements from #(index, value) pairs. Produces a dict-backed
@@ -33,7 +33,8 @@ pub fn from_indexed(items: List(#(Int, JsValue))) -> JsElements {
 /// Get element at index. Returns JsUndefined for missing/out-of-bounds.
 pub fn get(elements: JsElements, index: Int) -> JsValue {
   case elements {
-    DenseElements(data) -> array.get(index, data) |> option.unwrap(JsUndefined)
+    DenseElements(data) ->
+      tuple_array.get(index, data) |> option.unwrap(JsUndefined)
     SparseElements(data) -> dict.get(data, index) |> result.unwrap(JsUndefined)
   }
 }
@@ -42,8 +43,8 @@ pub fn get(elements: JsElements, index: Int) -> JsValue {
 pub fn get_option(elements: JsElements, index: Int) -> Option(JsValue) {
   case elements {
     DenseElements(data) ->
-      case index >= 0 && index < array.size(data) {
-        True -> array.get(index, data)
+      case index >= 0 && index < tuple_array.size(data) {
+        True -> tuple_array.get(index, data)
         False -> None
       }
     SparseElements(data) ->
@@ -57,7 +58,7 @@ pub fn get_option(elements: JsElements, index: Int) -> Option(JsValue) {
 /// Check if an element exists at index.
 pub fn has(elements: JsElements, index: Int) -> Bool {
   case elements {
-    DenseElements(data) -> index >= 0 && index < array.size(data)
+    DenseElements(data) -> index >= 0 && index < tuple_array.size(data)
     SparseElements(data) -> dict.has_key(data, index)
   }
 }
@@ -66,11 +67,11 @@ pub fn has(elements: JsElements, index: Int) -> Bool {
 pub fn set(elements: JsElements, index: Int, val: JsValue) -> JsElements {
   case elements {
     DenseElements(data) -> {
-      let size = array.size(data)
+      let size = tuple_array.size(data)
       case index < size {
         True ->
           // In-bounds write
-          case array.set(index, val, data) {
+          case tuple_array.set(index, val, data) {
             Ok(new_data) -> DenseElements(new_data)
             Error(_) -> elements
           }
@@ -82,9 +83,9 @@ pub fn set(elements: JsElements, index: Int, val: JsValue) -> JsElements {
               SparseElements(dense_to_sparse(data) |> dict.insert(index, val))
             False -> {
               // Small gap -> grow tuple, fill with JsUndefined
-              let grown = array.grow(data, index + 1, JsUndefined)
+              let grown = tuple_array.grow(data, index + 1, JsUndefined)
               DenseElements(
-                array.set(index, val, grown) |> result.unwrap(grown),
+                tuple_array.set(index, val, grown) |> result.unwrap(grown),
               )
             }
           }
@@ -107,7 +108,7 @@ pub fn delete(elements: JsElements, index: Int) -> JsElements {
 /// Get all values as a list (for GC ref tracing).
 pub fn values(elements: JsElements) -> List(JsValue) {
   case elements {
-    DenseElements(data) -> array.to_list(data)
+    DenseElements(data) -> tuple_array.to_list(data)
     SparseElements(data) -> dict.values(data)
   }
 }
@@ -115,7 +116,7 @@ pub fn values(elements: JsElements) -> List(JsValue) {
 /// Number of stored entries. NOT JS .length — use ArrayObject(length:) for that.
 pub fn stored_count(elements: JsElements) -> Int {
   case elements {
-    DenseElements(data) -> array.size(data)
+    DenseElements(data) -> tuple_array.size(data)
     SparseElements(data) -> dict.size(data)
   }
 }
@@ -124,11 +125,13 @@ pub fn stored_count(elements: JsElements) -> Int {
 pub fn truncate(elements: JsElements, new_len: Int) -> JsElements {
   case elements {
     DenseElements(data) ->
-      case new_len >= array.size(data) {
+      case new_len >= tuple_array.size(data) {
         True -> elements
         False ->
           DenseElements(
-            array.to_list(data) |> list.take(new_len) |> array.from_list(),
+            tuple_array.to_list(data)
+            |> list.take(new_len)
+            |> tuple_array.from_list(),
           )
       }
     SparseElements(data) ->
@@ -136,8 +139,8 @@ pub fn truncate(elements: JsElements, new_len: Int) -> JsElements {
   }
 }
 
-fn dense_to_sparse(data: array.Array(JsValue)) -> dict.Dict(Int, JsValue) {
-  array.to_list(data)
+fn dense_to_sparse(data: tuple_array.Array(JsValue)) -> dict.Dict(Int, JsValue) {
+  tuple_array.to_list(data)
   |> list.index_map(fn(val, idx) { #(idx, val) })
   |> dict.from_list()
 }

@@ -1,8 +1,8 @@
 import arc/vm/builtins/common
 import arc/vm/builtins/promise as builtins_promise
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type ArcNativeFn, type JsValue, type MailboxEvent, type PortableMessage,
   type Ref, ArcLog, ArcNative, ArcPeek, ArcPidToString, ArcReceive,
@@ -83,7 +83,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       ObjectSlot(
         kind: OrdinaryObject,
         properties:,
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(object_proto),
         symbol_properties:,
         extensible: True,
@@ -389,7 +389,7 @@ fn set_timeout_inner(
       ObjectSlot(
         kind: value.TimerObject(timer_ref:, data_ref:),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(state.builtins.object.prototype),
         symbol_properties: dict.new(),
         extensible: True,
@@ -503,7 +503,7 @@ fn log_stringify_one(val: JsValue, state: State) -> #(State, String) {
         Some(pid) -> #(state, "Pid" <> ffi_pid_to_string(pid))
         None ->
           // Try to convert to string via toString
-          case frame.to_string(state, val) {
+          case state.to_string(state, val) {
             Ok(#(s, state)) -> #(state, s)
             Error(#(_, state)) -> #(state, "[object Object]")
           }
@@ -556,7 +556,7 @@ pub fn alloc_pid_object(
         properties: dict.from_list([
           #("toString", value.builtin_property(JsObject(to_string_ref))),
         ]),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(object_proto),
         symbol_properties: dict.from_list([
           #(
@@ -580,9 +580,9 @@ pub fn pid_to_string(
     JsObject(ref) ->
       case heap.read_pid(state.heap, ref) {
         Some(pid) -> #(state, Ok(JsString("Pid" <> ffi_pid_to_string(pid))))
-        None -> frame.type_error(state, "Dead Pid")
+        None -> state.type_error(state, "Dead Pid")
       }
-    _ -> frame.type_error(state, "Invalid Pid object")
+    _ -> state.type_error(state, "Invalid Pid object")
   }
 }
 
@@ -662,8 +662,7 @@ fn serialize_array(
   case i >= length {
     True -> Ok(PmArray(list.reverse(acc)))
     False -> {
-      let val =
-        js_elements.get_option(elements, i) |> option.unwrap(JsUndefined)
+      let val = elements.get_option(elements, i) |> option.unwrap(JsUndefined)
       use pm <- result.try(serialize_inner(heap, val, seen))
       serialize_array(heap, elements, length, i + 1, seen, [pm, ..acc])
     }
@@ -755,7 +754,7 @@ pub fn deserialize(
           ObjectSlot(
             kind: OrdinaryObject,
             properties: dict.from_list(props),
-            elements: js_elements.new(),
+            elements: elements.new(),
             prototype: Some(builtins.object.prototype),
             symbol_properties: dict.from_list(sym_props),
             extensible: True,

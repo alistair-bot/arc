@@ -5,9 +5,9 @@
 /// Not truly weak (GC doesn't collect entries) but API-compatible.
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers.{first_arg}
-import arc/vm/frame.{type State, State}
 import arc/vm/heap.{type Heap}
-import arc/vm/js_elements
+import arc/vm/internal/elements
+import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type Ref, type WeakSetNativeFn, Dispatch, JsBool, JsObject,
   ObjectSlot, WeakSetConstructor, WeakSetNative, WeakSetObject,
@@ -78,7 +78,7 @@ fn construct(
       ObjectSlot(
         kind: WeakSetObject(data: dict.new()),
         properties: dict.new(),
-        elements: js_elements.new(),
+        elements: elements.new(),
         prototype: Some(proto),
         symbol_properties: dict.new(),
         extensible: True,
@@ -100,7 +100,7 @@ fn weak_set_add(
       let heap = update_weak_set(state.heap, ref, new_data)
       #(State(..state, heap:), Ok(this))
     }
-    _ -> frame.type_error(state, "Invalid value used in weak set")
+    _ -> state.type_error(state, "Invalid value used in weak set")
   }
 }
 
@@ -151,9 +151,9 @@ fn require_weak_set(
       case heap.read(state.heap, ref) {
         Some(ObjectSlot(kind: WeakSetObject(data:), ..)) ->
           cont(data, ref, state)
-        _ -> frame.type_error(state, err)
+        _ -> state.type_error(state, err)
       }
-    _ -> frame.type_error(state, err)
+    _ -> state.type_error(state, err)
   }
 }
 

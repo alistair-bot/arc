@@ -160,9 +160,9 @@ spawn_worker({Name, Fun}, Parent, Ref, Feeder, FeedRef) ->
         TestRef = make_ref(),
         process_flag(trap_exit, true),
         Pid = spawn_link(fun() ->
-            %% Limit heap to 4M words (~32MB on 64-bit) to prevent
-            %% pathological tests (e.g. Array(2**32-1)) from consuming all RAM
-            process_flag(max_heap_size, #{size => 4000000, kill => true, error_logger => false}),
+            %% Limit heap to ~80MB to prevent pathological tests
+            %% (e.g. Array(2**32-1).join()) from consuming all RAM on CI.
+            process_flag(max_heap_size, #{size => 10000000, kill => true, error_logger => false}),
             Res = try Fun(), ok
             catch Class:Reason:Stack -> {error, {Class, Reason, Stack}}
             end,

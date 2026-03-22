@@ -24,10 +24,10 @@ pub type TestMetadata {
 /// Returns default metadata if no frontmatter found.
 pub fn parse_metadata(source: String) -> TestMetadata {
   case string.split_once(source, "/*---") {
-    Error(_) -> default_metadata()
+    Error(Nil) -> default_metadata()
     Ok(#(_, rest)) ->
       case string.split_once(rest, "---*/") {
-        Error(_) -> default_metadata()
+        Error(Nil) -> default_metadata()
         Ok(#(yaml, _)) -> parse_yaml_block(yaml)
       }
   }

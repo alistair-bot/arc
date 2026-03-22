@@ -25,7 +25,7 @@ Use WebFetch/WebSearch to read source on GitHub. For QuickJS, search `quickjs.c`
 
 ### Never silently discard errors
 
-- `Error(_) ->` is banned unless the error type is `Nil`. Always bind and log with `string.inspect`.
+- `Error(_) ->` is banned, especially if the error type is `Nil`. Always bind and/or log with `string.inspect`. You can also use `Error(Nil) ->` for Nil error values.
 - Same for `fn(_err)` and `result.map_error(fn(_) { ... })` — always include the original error.
 
 ### No nested case pyramids

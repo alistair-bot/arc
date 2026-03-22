@@ -85,17 +85,34 @@ main() ->
         false -> ok
     end,
 
-    %% Print non-test262 failures
-    NonT262Failed = [F || {N, _, _, _} = F <- Failed,
-                          not (is_binary(N) andalso
-                               binary:match(N, <<"test262/">>) =/= nomatch)],
+    %% Split test262 failures from unit-test failures for printing.
+    %% Both count toward the exit code — test262 failures here are snapshot
+    %% mismatches (REGRESSION or NEW PASS), which should fail CI so the
+    %% snapshot is kept in sync.
+    {T262Failed, NonT262Failed} = lists:partition(fun({N, _, _, _}) ->
+        is_binary(N) andalso binary:match(N, <<"test262/">>) =/= nomatch
+    end, Failed),
     lists:foreach(fun({Name, Class, Reason, Stack}) ->
         io:format("~n  FAIL ~ts~n", [Name]),
         print_failure(Class, Reason, Stack)
     end, NonT262Failed),
+    case T262Failed of
+        [] -> ok;
+        _ ->
+            io:format("~n  ~b test262 snapshot mismatch(es) — "
+                      "investigate, then UPDATE_SNAPSHOT=1 to accept:~n",
+                      [length(T262Failed)]),
+            lists:foreach(fun({Name, _, Reason, _}) ->
+                io:format("    ~ts: ~ts~n", [Name, to_list(Reason)])
+            end, lists:sublist(T262Failed, 20)),
+            case length(T262Failed) > 20 of
+                true -> io:format("    ... and ~b more~n", [length(T262Failed) - 20]);
+                false -> ok
+            end
+    end,
 
-    %% Summary
-    FailCount = length(NonT262Failed),
+    %% Summary — exit code includes test262 snapshot mismatches
+    FailCount = length(Failed),
     io:format("~n~b passed, ~b failed (~.1fs)~n", [Passed, FailCount, Elapsed / 1000.0]),
 
     case FailCount of

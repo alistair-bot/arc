@@ -162,7 +162,7 @@ pub fn dispatch(
 ///      (skipped — no NewTarget tracking yet)
 ///   2. If value is undefined or null, return OrdinaryObjectCreate(%Object.prototype%).
 ///   3. Return ! ToObject(value).
-pub fn call_native(
+fn call_native(
   args: List(JsValue),
   _this: JsValue,
   state: State,
@@ -207,7 +207,7 @@ pub fn call_native(
 /// 2. Let key be ? ToPropertyKey(P).
 /// 3. Let desc be ? obj.[[GetOwnProperty]](key).
 /// 4. Return FromPropertyDescriptor(desc).
-pub fn get_own_property_descriptor(
+fn get_own_property_descriptor(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -363,7 +363,7 @@ fn make_descriptor_object(
 /// 3. Let desc be ? ToPropertyDescriptor(Attributes).
 /// 4. Perform ? DefinePropertyOrThrow(O, key, desc).
 /// 5. Return O.
-pub fn define_property(
+fn define_property(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -819,7 +819,7 @@ fn read_desc_bool(
 ///         i. Append nextKey to nameList.
 ///   5. Return CreateArrayFromList(nameList).
 ///
-pub fn get_own_property_names(
+fn get_own_property_names(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -833,10 +833,7 @@ pub fn get_own_property_names(
 ///   2. Let nameList be ? EnumerableOwnProperties(obj, key).
 ///   3. Return CreateArrayFromList(nameList).
 ///
-pub fn keys(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn keys(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let array_proto = state.builtins.array.prototype
   own_keys_impl(args, state, array_proto, True)
 }
@@ -1026,7 +1023,7 @@ fn string_index_keys(i: Int, len: Int) -> List(JsValue) {
 ///
 /// TODO(Deviation): ToPropertyKey is approximated by ToString — symbol
 /// arguments are not yet handled as property keys.
-pub fn has_own_property(
+fn has_own_property(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1077,7 +1074,7 @@ pub fn has_own_property(
 ///
 /// TODO(Deviation): ToPropertyKey is approximated by ToString — symbol
 /// keys are not yet handled as property keys.
-pub fn property_is_enumerable(
+fn property_is_enumerable(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1140,7 +1137,7 @@ pub fn property_is_enumerable(
 ///
 /// TODO(Deviation): Steps 8, 12 (Error, Date) are not yet
 /// implemented since those object kinds don't exist yet.
-pub fn object_to_string(
+fn object_to_string(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -1255,7 +1252,7 @@ fn get_to_string_tag(heap: Heap, ref: Ref) -> option.Option(String) {
 /// as-is instead of creating a wrapper object. In practice this rarely matters
 /// because primitive valueOf methods (e.g. Number.prototype.valueOf) override
 /// this, and callers that receive a primitive can work with it directly.
-pub fn object_value_of(
+fn object_value_of(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -1279,7 +1276,7 @@ pub fn object_value_of(
 ///   1. Let obj be ? ToObject(O).
 ///   2. Let nameList be ? EnumerableOwnProperties(obj, value).
 ///   3. Return CreateArrayFromList(nameList).
-pub fn values(
+fn values(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -1300,7 +1297,7 @@ pub fn values(
 /// EnumerableOwnProperties with kind=key+value (§7.3.23 step 3.a.ii.2):
 ///   "Let entry be CreateArrayFromList(« key, value »)."
 ///   "Append entry to properties."
-pub fn entries(
+fn entries(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -1473,7 +1470,7 @@ fn collect_entries(
 ///     a. Return ? ObjectDefineProperties(obj, Properties).
 ///   4. Return obj.
 ///
-pub fn create(
+fn create(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -1523,7 +1520,7 @@ pub fn create(
 ///
 /// ObjectDefineProperties is the abstract operation at §20.1.2.3.1 —
 /// implemented by define_properties_on + define_props_loop below.
-pub fn define_properties(
+fn define_properties(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -1631,7 +1628,7 @@ fn define_props_loop(
 ///           b. Perform ? Set(to, nextKey, propValue, true).
 ///   4. Return to.
 ///
-pub fn assign(
+fn assign(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -1860,10 +1857,7 @@ fn assign_symbol_keys(
 ///   - `JsNumber(NaN) == JsNumber(NaN)` is True (constructor equality on BEAM)
 ///   - `Finite(0.0) == Finite(-0.0)` is False (BEAM `=:=` distinguishes ±0)
 ///   - All other types use structural equality, matching SameValueNonNumber.
-pub fn is(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn is(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let #(a, b) = case args {
     [x, y, ..] -> #(x, y)
     [x] -> #(x, JsUndefined)
@@ -1892,7 +1886,7 @@ pub fn is(
 ///
 /// TODO(Deviation): ToPropertyKey is approximated by ToString — symbol keys
 /// are not yet handled as property keys.
-pub fn has_own(
+fn has_own(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -1942,7 +1936,7 @@ pub fn has_own(
 /// [[GetPrototypeOf]] for ordinary objects is OrdinaryGetPrototypeOf (§10.1.1.1):
 ///   1. Return O.[[Prototype]].
 ///
-pub fn get_prototype_of(
+fn get_prototype_of(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -1994,7 +1988,7 @@ pub fn get_prototype_of(
 ///   8. Set O.[[Prototype]] to V.
 ///   9. Return true.
 ///
-pub fn set_prototype_of(
+fn set_prototype_of(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2140,7 +2134,7 @@ fn freeze_prop(prop: value.Property) -> value.Property {
 ///
 /// NOTE: Elements (indexed properties in our dense array) are NOT frozen —
 /// only named and symbol properties. This is a known simplification.
-pub fn freeze(
+fn freeze(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2187,7 +2181,7 @@ pub fn freeze(
 ///   2. Return true.
 ///
 /// Ordinary [[PreventExtensions]] always returns true, so step 3 never fires.
-pub fn prevent_extensions(
+fn prevent_extensions(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2251,7 +2245,7 @@ fn all_frozen(props: dict.Dict(k, value.Property)) -> Bool {
 ///
 /// TODO(Deviation): Elements (dense indexed properties) are not checked —
 /// only named and symbol properties. Same simplification as freeze.
-pub fn is_frozen(
+fn is_frozen(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2282,7 +2276,7 @@ pub fn is_frozen(
 ///
 /// [[IsExtensible]] for ordinary objects — §10.1.3.1:
 ///   1. Return O.[[Extensible]].
-pub fn is_extensible(
+fn is_extensible(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2309,10 +2303,7 @@ pub fn is_extensible(
 /// SetIntegrityLevel ( O, sealed ) — §7.3.16:
 ///   1. Let status be ? O.[[PreventExtensions]]().
 ///   3. For each key in keys, set configurable=false on all own properties.
-pub fn seal(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn seal(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let target = first_arg(args)
   case target {
     JsObject(ref) -> {
@@ -2356,7 +2347,7 @@ fn seal_prop(prop: value.Property) -> value.Property {
 ///   1. If extensible is true, return false.
 ///   4. For each property, if configurable is true, return false.
 ///   5. Return true.
-pub fn is_sealed(
+fn is_sealed(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2405,7 +2396,7 @@ fn all_sealed(props: dict.Dict(k, value.Property)) -> Bool {
 ///
 /// Simplified: handles Arrays of [key, value] pairs. General iterables
 /// (objects with Symbol.iterator) are not yet supported.
-pub fn from_entries(
+fn from_entries(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2503,7 +2494,7 @@ fn from_entries_loop(
 ///      b. Let descriptor be FromPropertyDescriptor(desc).
 ///      c. If descriptor is not undefined, CreateDataPropertyOrThrow(descriptors, key, descriptor).
 ///   5. Return descriptors.
-pub fn get_own_property_descriptors(
+fn get_own_property_descriptors(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -2558,7 +2549,7 @@ pub fn get_own_property_descriptors(
 /// ToObject creates a wrapper that has no own symbol-keyed properties,
 /// so the result is always an empty array.
 /// For null/undefined, throws TypeError.
-pub fn get_own_property_symbols(
+fn get_own_property_symbols(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {

@@ -119,10 +119,7 @@ pub fn dispatch(
 
 /// Arc.peek(promise)
 /// Returns {type: 'pending'} | {type: 'resolved', value} | {type: 'rejected', reason}
-pub fn peek(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn peek(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let arg = case args {
     [a, ..] -> a
     [] -> JsUndefined
@@ -176,10 +173,7 @@ fn read_promise_state(
 /// portable form (only primitives, plain objects, arrays, and PIDs are
 /// supported). Returns the sent message value.
 /// Throws TypeError if pid is not a Pid or message is not serializable.
-pub fn send(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn send(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let #(pid_arg, msg_arg) = case args {
     [p, m, ..] -> #(p, m)
     [p] -> #(p, JsUndefined)
@@ -225,7 +219,7 @@ pub fn send(
 /// Uses selective receive — only matches `UserMessage`, so `SettlePromise`
 /// events stay in the mailbox for the event loop. Both blocking and async
 /// receive share the same BEAM mailbox with no in-memory buffer.
-pub fn receive_(
+fn receive_(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -273,7 +267,7 @@ pub fn receive_(
 ///
 /// Requires the event loop to be running (--event-loop flag or Arc.spawn).
 /// Throws TypeError if the event loop is not enabled.
-pub fn receive_async(
+fn receive_async(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -336,7 +330,7 @@ fn receive_async_inner(
 ///
 /// Requires the event loop to be running (--event-loop flag or Arc.spawn).
 /// Throws TypeError if the event loop is not enabled.
-pub fn set_timeout(
+fn set_timeout(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -407,7 +401,7 @@ fn set_timeout_inner(
 /// Cancels a timer created by `Arc.setTimeout`. If the timer hasn't fired
 /// yet, the callback will not be invoked and `outstanding` is decremented.
 /// If it already fired (or `timer` isn't a timer), this is a no-op.
-pub fn clear_timeout(
+fn clear_timeout(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -441,7 +435,7 @@ fn as_timer_ref(h: Heap, val: JsValue) -> Option(value.ErlangTimerRef) {
 
 /// Arc.self()
 /// Returns a Pid object representing the current BEAM process.
-pub fn self_(
+fn self_(
   _args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -461,10 +455,7 @@ pub fn self_(
 /// Arc.log(...args)
 /// Prints values to stdout, space-separated, with a newline.
 /// Similar to console.log but available in spawned processes.
-pub fn log(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn log(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let #(state, parts) = log_stringify_args(args, state, [])
   io.println(string.join(parts, " "))
   #(state, Ok(JsUndefined))
@@ -516,7 +507,7 @@ fn log_stringify_one(val: JsValue, state: State) -> #(State, String) {
 /// Arc.sleep(ms)
 /// Suspends the current BEAM process for the given number of milliseconds.
 /// Maps directly to Erlang's timer:sleep/1.
-pub fn sleep(
+fn sleep(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -571,7 +562,7 @@ pub fn alloc_pid_object(
 }
 
 /// Pid toString — returns "Pid<0.83.0>" when called on a PidObject.
-pub fn pid_to_string(
+fn pid_to_string(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -591,7 +582,7 @@ pub fn pid_to_string(
 /// Serialize a JsValue into a PortableMessage for cross-process transfer.
 /// Only supports primitives, plain objects, arrays, and PIDs.
 /// Returns Error(reason) for unsupported types (functions, promises, etc.).
-pub fn serialize(heap: Heap, val: JsValue) -> Result(PortableMessage, String) {
+fn serialize(heap: Heap, val: JsValue) -> Result(PortableMessage, String) {
   serialize_inner(heap, val, set.new())
 }
 

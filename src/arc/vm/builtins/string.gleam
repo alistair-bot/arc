@@ -179,34 +179,6 @@ pub fn dispatch(
   }
 }
 
-/// ES2024 22.1.1.1 — String ( value )
-/// When String is called as a function (not as a constructor):
-///   1. If value is not present, let s be the empty String.
-///   2. Else,
-///     a. If NewTarget is undefined and value is a Symbol, return
-///        SymbolDescriptiveString(value).
-///     b. Let s be ? ToString(value).
-///   3. If NewTarget is undefined, return s.
-///
-/// TODO(Deviation): Step 2a (Symbol descriptive string) needs Symbol.toPrimitive support.
-/// Note: Constructor path (NewTarget defined) is handled separately
-/// in vm.gleam, this only covers the function-call path (step 3).
-pub fn call_as_function(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
-  case args {
-    // Step 1: no value => empty string
-    [] -> #(state, Ok(JsString("")))
-    // Step 2b: ToString(value)
-    [val, ..] -> {
-      use s, state <- state.try_to_string(state, val)
-      // Step 3: return s (NewTarget is always undefined here)
-      #(state, Ok(JsString(s)))
-    }
-  }
-}
-
 // ============================================================================
 // String.prototype method implementations
 // ============================================================================
@@ -219,7 +191,7 @@ pub fn call_as_function(
 ///   5. If position < 0 or position >= size, return the empty String.
 ///   6. Return the substring of S from position to position + 1.
 ///
-pub fn string_char_at(
+fn string_char_at(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -250,7 +222,7 @@ pub fn string_char_at(
 /// For BMP characters this is equivalent, but for supplementary chars
 /// (U+10000+) this returns the full codepoint rather than the leading
 /// surrogate. Needs UTF-16 surrogate pair splitting.
-pub fn string_char_code_at(
+fn string_char_code_at(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -288,7 +260,7 @@ pub fn string_char_code_at(
 ///   7. Let start be the result of clamping pos between 0 and len.
 ///   8. Return StringIndexOf(S, searchStr, start).
 ///
-pub fn string_index_of(
+fn string_index_of(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -323,7 +295,7 @@ pub fn string_index_of(
 ///
 /// Note: Steps 4-6 use to_number_int which returns None for NaN,
 /// and None maps to len (equivalent to +inf clamped to len).
-pub fn string_last_index_of(
+fn string_last_index_of(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -364,7 +336,7 @@ pub fn string_last_index_of(
 ///
 /// TODO(Deviation): Steps 3-4 (IsRegExp check) not implemented — needs RegExp.
 /// Passing a RegExp will be coerced to string instead of throwing TypeError.
-pub fn string_includes(
+fn string_includes(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -397,7 +369,7 @@ pub fn string_includes(
 ///  12. Return false.
 ///
 /// TODO(Deviation): Steps 3-4 (IsRegExp check) not implemented — needs RegExp.
-pub fn string_starts_with(
+fn string_starts_with(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -430,7 +402,7 @@ pub fn string_starts_with(
 ///  13. Return false.
 ///
 /// TODO(Deviation): Steps 3-4 (IsRegExp check) not implemented — needs RegExp.
-pub fn string_ends_with(
+fn string_ends_with(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -472,7 +444,7 @@ pub fn string_ends_with(
 ///  12. If from >= to, return the empty String.
 ///  13. Return the substring of S from from to to.
 ///
-pub fn string_slice(
+fn string_slice(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -528,7 +500,7 @@ fn resolve_slice_index(n: Int, len: Int) -> Int {
 ///
 /// Note: Unlike slice(), substring() does NOT support negative indices.
 /// Negative values are clamped to 0. Arguments are swapped if start > end.
-pub fn string_substring(
+fn string_substring(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -565,7 +537,7 @@ pub fn string_substring(
 ///      Default Case Conversion algorithm.
 ///   5. Let L be CodePointsToString(lowerText).
 ///   6. Return L.
-pub fn string_to_lower_case(
+fn string_to_lower_case(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -584,7 +556,7 @@ pub fn string_to_lower_case(
 ///
 /// Note: This method interprets the String value as a sequence of UTF-16
 /// encoded code points, as described in 6.1.4.
-pub fn string_to_upper_case(
+fn string_to_upper_case(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -602,7 +574,7 @@ pub fn string_to_upper_case(
 ///   3. If where is start+end, let T be the String value that is a copy of
 ///      S with both leading and trailing white space removed.
 ///   4. Return T.
-pub fn string_trim(
+fn string_trim(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -615,7 +587,7 @@ pub fn string_trim(
 ///   2. Return ? TrimString(S, start).
 ///
 /// TrimString with where=start removes only leading whitespace.
-pub fn string_trim_start(
+fn string_trim_start(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -628,7 +600,7 @@ pub fn string_trim_start(
 ///   2. Return ? TrimString(S, end).
 ///
 /// TrimString with where=end removes only trailing whitespace.
-pub fn string_trim_end(
+fn string_trim_end(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -864,7 +836,7 @@ fn try_replace_or_string_replace_all(
 /// TODO(Deviation): Step 4 uses ToIntegerOrInfinity instead of ToUint32 for limit.
 /// TODO(Deviation): Step 9 uses graphemes instead of UTF-16 code units for
 /// empty-string split — needs UTF-16 string model.
-pub fn string_split(
+fn string_split(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -940,7 +912,7 @@ fn string_split_parts(
 ///     a. Let nextString be ? ToString(next).
 ///     b. Set R to the string-concatenation of R and nextString.
 ///   5. Return R.
-pub fn string_concat(
+fn string_concat(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -989,7 +961,7 @@ fn this_string_value(state: State, this: JsValue) -> option.Option(String) {
 
 /// ES2024 22.1.3.26 — String.prototype.toString ( )
 ///   1. Return ? thisStringValue(this value).
-pub fn string_to_string(
+fn string_to_string(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -1007,7 +979,7 @@ pub fn string_to_string(
 
 /// ES2024 22.1.3.33 — String.prototype.valueOf ( )
 ///   1. Return ? thisStringValue(this value).
-pub fn string_value_of(
+fn string_value_of(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -1032,7 +1004,7 @@ pub fn string_value_of(
 ///   6. Return the String value that is made from n copies of S appended
 ///      together.
 ///
-pub fn string_repeat(
+fn string_repeat(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1078,7 +1050,7 @@ pub fn string_repeat(
 /// ES2024 22.1.3.17 — String.prototype.padStart ( maxLength [ , fillString ] )
 ///   1. Let O be ? RequireObjectCoercible(this value).
 ///   2. Return ? StringPad(O, maxLength, fillString, start).
-pub fn string_pad_start(
+fn string_pad_start(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1089,7 +1061,7 @@ pub fn string_pad_start(
 /// ES2024 22.1.3.16 — String.prototype.padEnd ( maxLength [ , fillString ] )
 ///   1. Let O be ? RequireObjectCoercible(this value).
 ///   2. Return ? StringPad(O, maxLength, fillString, end).
-pub fn string_pad_end(
+fn string_pad_end(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1136,7 +1108,7 @@ fn string_pad(
 ///     a. Let k be len + relativeIndex.
 ///   7. If k < 0 or k >= len, return undefined.
 ///   8. Return the substring of S from k to k + 1.
-pub fn string_at(
+fn string_at(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1172,7 +1144,7 @@ pub fn string_at(
 /// codepoints with string.to_utf_codepoints, then index into that list.
 /// This correctly handles supplementary characters (U+10000+) as single
 /// codepoints, matching the JS spec's CodePointAt semantics.
-pub fn string_code_point_at(
+fn string_code_point_at(
   this: JsValue,
   args: List(JsValue),
   state: State,

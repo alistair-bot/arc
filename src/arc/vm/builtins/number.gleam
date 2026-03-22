@@ -172,7 +172,7 @@ pub fn dispatch(
 ///
 /// Note: Constructor semantics (new Number(value)) are handled separately
 /// in vm.gleam's construct path, which wraps the result in a NumberObject.
-pub fn call_as_function(
+fn call_as_function(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -209,7 +209,7 @@ pub fn call_as_function(
 ///  15. If mathInt = 0 and S[0] was -, return -0.
 ///  16. Return sign * mathInt.
 ///
-pub fn parse_int(
+fn parse_int(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -270,7 +270,7 @@ pub fn parse_int(
 /// TODO(Deviation): Does not implement longest-prefix parsing — the full trimmed
 /// string is attempted. E.g. parseFloat("123abc") should return 123 but
 /// this implementation returns NaN.
-pub fn parse_float(
+fn parse_float(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -312,7 +312,7 @@ fn parse_decimal_string(str: String) -> JsNum {
 /// Note: Unlike Number.isNaN, this coerces the argument via ToNumber first.
 /// So isNaN("hello") is true (ToNumber("hello") = NaN), but
 /// Number.isNaN("hello") is false (not a Number type at all).
-pub fn js_is_nan(
+fn js_is_nan(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -338,7 +338,7 @@ pub fn js_is_nan(
 ///
 /// Note: Unlike Number.isFinite, this coerces via ToNumber first.
 /// So isFinite("42") is true, but Number.isFinite("42") is false.
-pub fn js_is_finite(
+fn js_is_finite(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -361,7 +361,7 @@ pub fn js_is_finite(
 ///   1. If number is not a Number, return false.
 ///   2. If number is NaN, return true.
 ///   3. Otherwise, return false.
-pub fn number_is_nan(
+fn number_is_nan(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -378,7 +378,7 @@ pub fn number_is_nan(
 ///   1. If number is not a Number, return false.
 ///   2. If number is not finite (NaN, +Inf, -Inf), return false.
 ///   3. Otherwise, return true.
-pub fn number_is_finite(
+fn number_is_finite(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -397,7 +397,7 @@ pub fn number_is_finite(
 ///   3. Let integer be truncate(number) (i.e. round toward zero).
 ///   4. If integer != number, return false.
 ///   5. Return true.
-pub fn number_is_integer(
+fn number_is_integer(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -420,7 +420,7 @@ pub fn number_is_integer(
 /// thisNumberValue (§21.1.3) either returns the Number primitive directly
 /// or unwraps [[NumberData]] from a Number wrapper object, else throws
 /// TypeError.
-pub fn number_value_of(
+fn number_value_of(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -447,7 +447,7 @@ pub fn number_value_of(
 ///
 /// Note: Non-integer values with non-10 radix fall back to decimal
 /// formatting. Proper fractional radix conversion is not implemented.
-pub fn number_to_string(
+fn number_to_string(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -493,7 +493,7 @@ fn this_number_value(state: State, this: JsValue) -> Option(JsNum) {
 }
 
 /// Number.isSafeInteger(number) — ES2024 §21.1.2.5
-pub fn number_is_safe_integer(
+fn number_is_safe_integer(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -512,7 +512,7 @@ pub fn number_is_safe_integer(
 }
 
 /// Number.prototype.toFixed(fractionDigits) — ES2024 §21.1.3.3
-pub fn number_to_fixed(
+fn number_to_fixed(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -533,7 +533,7 @@ pub fn number_to_fixed(
 }
 
 /// Number.prototype.toExponential(fractionDigits) — ES2024 §21.1.3.2
-pub fn number_to_exponential(
+fn number_to_exponential(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -557,7 +557,7 @@ pub fn number_to_exponential(
 }
 
 /// Number.prototype.toPrecision(precision) — ES2024 §21.1.3.5
-pub fn number_to_precision(
+fn number_to_precision(
   this: JsValue,
   args: List(JsValue),
   state: State,

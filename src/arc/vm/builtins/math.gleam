@@ -149,7 +149,7 @@ pub fn dispatch(
 // ============================================================================
 
 /// Math.pow(base, exponent)
-pub fn math_pow(
+fn math_pow(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -159,7 +159,7 @@ pub fn math_pow(
 }
 
 /// Math.abs(x)
-pub fn math_abs(
+fn math_abs(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -172,7 +172,7 @@ pub fn math_abs(
 }
 
 /// Math.floor(x)
-pub fn math_floor(
+fn math_floor(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -181,7 +181,7 @@ pub fn math_floor(
 }
 
 /// Math.ceil(x)
-pub fn math_ceil(
+fn math_ceil(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -190,7 +190,7 @@ pub fn math_ceil(
 }
 
 /// Math.round(x) — JS round: round half toward +Infinity (NOT banker's rounding)
-pub fn math_round(
+fn math_round(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -199,7 +199,7 @@ pub fn math_round(
 }
 
 /// Math.trunc(x)
-pub fn math_trunc(
+fn math_trunc(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -208,7 +208,7 @@ pub fn math_trunc(
 }
 
 /// Math.sqrt(x)
-pub fn math_sqrt(
+fn math_sqrt(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -225,7 +225,7 @@ pub fn math_sqrt(
 }
 
 /// Math.max(a, b, ...) — returns -Infinity for no args.
-pub fn math_max(
+fn math_max(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -243,7 +243,7 @@ pub fn math_max(
 }
 
 /// Math.min(a, b, ...) — returns +Infinity for no args.
-pub fn math_min(
+fn math_min(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -261,7 +261,7 @@ pub fn math_min(
 }
 
 /// Math.log(x)
-pub fn math_log(
+fn math_log(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -270,7 +270,7 @@ pub fn math_log(
 }
 
 /// Math.sin(x)
-pub fn math_sin(
+fn math_sin(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -279,7 +279,7 @@ pub fn math_sin(
 }
 
 /// Math.cos(x)
-pub fn math_cos(
+fn math_cos(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -288,7 +288,7 @@ pub fn math_cos(
 }
 
 /// Math.tan(x)
-pub fn math_tan(
+fn math_tan(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -297,7 +297,7 @@ pub fn math_tan(
 }
 
 /// Math.asin(x) — domain [-1, 1], returns NaN outside
-pub fn math_asin(
+fn math_asin(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -306,7 +306,7 @@ pub fn math_asin(
 }
 
 /// Math.acos(x) — domain [-1, 1], returns NaN outside
-pub fn math_acos(
+fn math_acos(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -315,7 +315,7 @@ pub fn math_acos(
 }
 
 /// Math.atan(x)
-pub fn math_atan(
+fn math_atan(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -329,7 +329,7 @@ pub fn math_atan(
 }
 
 /// Math.atan2(y, x)
-pub fn math_atan2(
+fn math_atan2(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -359,7 +359,7 @@ pub fn math_atan2(
 }
 
 /// Math.exp(x)
-pub fn math_exp(
+fn math_exp(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -373,7 +373,7 @@ pub fn math_exp(
 }
 
 /// Math.log2(x)
-pub fn math_log2(
+fn math_log2(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -382,7 +382,7 @@ pub fn math_log2(
 }
 
 /// Math.log10(x)
-pub fn math_log10(
+fn math_log10(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -391,7 +391,7 @@ pub fn math_log10(
 }
 
 /// Math.random() — returns a random float in [0, 1)
-pub fn math_random(
+fn math_random(
   _args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -399,7 +399,7 @@ pub fn math_random(
 }
 
 /// Math.sign(x) — returns -1, 0, or 1 (preserving ±0)
-pub fn math_sign(
+fn math_sign(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -415,7 +415,7 @@ pub fn math_sign(
 }
 
 /// Math.cbrt(x) — cube root
-pub fn math_cbrt(
+fn math_cbrt(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -436,7 +436,7 @@ pub fn math_cbrt(
 }
 
 /// Math.hypot(a, b, ...) — sqrt(sum of squares). Per spec, ±∞ beats NaN.
-pub fn math_hypot(
+fn math_hypot(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -460,7 +460,7 @@ pub fn math_hypot(
 }
 
 /// Math.fround(x) — round to nearest 32-bit float
-pub fn math_fround(
+fn math_fround(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -469,7 +469,7 @@ pub fn math_fround(
 }
 
 /// Math.clz32(x) — count leading zeros in 32-bit integer representation
-pub fn math_clz32(
+fn math_clz32(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -482,7 +482,7 @@ pub fn math_clz32(
 }
 
 /// Math.imul(a, b) — 32-bit integer multiplication
-pub fn math_imul(
+fn math_imul(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -501,7 +501,7 @@ pub fn math_imul(
 }
 
 /// Math.expm1(x) — e^x - 1 (more precise for small x)
-pub fn math_expm1(
+fn math_expm1(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -515,7 +515,7 @@ pub fn math_expm1(
 }
 
 /// Math.log1p(x) — log(1 + x) (more precise for small x)
-pub fn math_log1p(
+fn math_log1p(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -530,7 +530,7 @@ pub fn math_log1p(
 }
 
 /// Math.sinh(x)
-pub fn math_sinh(
+fn math_sinh(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -542,7 +542,7 @@ pub fn math_sinh(
 }
 
 /// Math.cosh(x)
-pub fn math_cosh(
+fn math_cosh(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -555,7 +555,7 @@ pub fn math_cosh(
 }
 
 /// Math.tanh(x)
-pub fn math_tanh(
+fn math_tanh(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -569,7 +569,7 @@ pub fn math_tanh(
 }
 
 /// Math.asinh(x)
-pub fn math_asinh(
+fn math_asinh(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -581,7 +581,7 @@ pub fn math_asinh(
 }
 
 /// Math.acosh(x) — domain [1, +Infinity), NaN for < 1
-pub fn math_acosh(
+fn math_acosh(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -598,7 +598,7 @@ pub fn math_acosh(
 }
 
 /// Math.atanh(x) — domain (-1, 1), NaN outside, ±Infinity at ±1
-pub fn math_atanh(
+fn math_atanh(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {

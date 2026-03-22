@@ -172,7 +172,7 @@ pub fn dispatch(
 /// Wrapper that threads State around native_array_constructor.
 /// §23.1.1 The Array Constructor: "is the initial value of the Array property
 /// of the global object." Called as both function and constructor (identical).
-pub fn construct(
+fn construct(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -186,7 +186,7 @@ pub fn construct(
 /// Array.isArray(value) — check if a value is an array.
 /// Wrapper that threads State around native_is_array.
 /// §23.1.2.1 Array.isArray ( arg )
-pub fn is_array(
+fn is_array(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -298,7 +298,7 @@ fn native_is_array(args: List(JsValue), heap: Heap) -> JsValue {
 
 /// Array.prototype.join ( separator )
 /// ES2024 §23.1.3.18
-pub fn array_join(
+fn array_join(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -373,7 +373,7 @@ fn join_elements(
 
 /// Array.prototype.push ( ...items )
 /// ES2024 §23.1.3.22
-pub fn array_push(
+fn array_push(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1146,7 +1146,7 @@ fn generic_get(
 ///    f. Perform ? Set(O, "length", newLen, true).
 ///    g. Return element.
 ///
-pub fn array_pop(
+fn array_pop(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -1197,7 +1197,7 @@ pub fn array_pop(
 /// 8. Perform ? Set(O, "length", 𝔽(len - 1), true).
 /// 9. Return first.
 ///
-pub fn array_shift(
+fn array_shift(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -1303,7 +1303,7 @@ fn shift_left_generic(
 /// 5. Perform ? Set(O, "length", 𝔽(len + argCount), true).
 /// 6. Return 𝔽(len + argCount).
 ///
-pub fn array_unshift(
+fn array_unshift(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1483,7 +1483,7 @@ fn try_wrap(
 ///     source elements, preserving holes (sparse indices are not copied).
 ///   - Step 15: length is set via ArrayObject(count) in the slot constructor
 ///     rather than a separate Set("length") call.
-pub fn array_slice(
+fn array_slice(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1603,7 +1603,7 @@ fn copy_range(
 ///   - Steps 5b.iv.2-3: Hole handling done by copy_range (HasProperty check).
 ///   - Step 6: length is baked into ArrayObject(length) at construction time
 ///     rather than a separate Set("length") call.
-pub fn array_concat(
+fn array_concat(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1709,7 +1709,7 @@ fn concat_item(
 ///    l. Set lower to lower + 1.
 /// 6. Return O.
 ///
-pub fn array_reverse(
+fn array_reverse(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -1802,7 +1802,7 @@ fn reverse_generic(
 ///     c. Set k to k + 1.
 /// 13. Return O.
 ///
-pub fn array_fill(
+fn array_fill(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1862,7 +1862,7 @@ fn fill_generic(
 /// 6. If k < 0 or k >= len, return undefined.
 /// 7. Return ? Get(O, ! ToString(𝔽(k))).
 ///
-pub fn array_at(
+fn array_at(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1912,7 +1912,7 @@ pub fn array_at(
 ///
 /// Steps 1-2 combined via require_array. Step 9 loop delegated to
 /// search_forward with skip_holes=True (step 9a HasProperty check).
-pub fn array_index_of(
+fn array_index_of(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -1979,7 +1979,7 @@ pub fn array_index_of(
 /// explicitly passing undefined yields ToIntegerOrInfinity(undefined) = 0,
 /// while omitting defaults to len-1 per step 5. Step 9 loop delegated to
 /// search_backward.
-pub fn array_last_index_of(
+fn array_last_index_of(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2039,7 +2039,7 @@ pub fn array_last_index_of(
 /// Steps 1-2 combined via require_array. Step 9a does NOT have a HasProperty
 /// check (unlike indexOf) — holes are visited and treated as undefined per the
 /// spec. Delegated to search_forward with skip_holes=False and SameValueZero.
-pub fn array_includes(
+fn array_includes(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2196,7 +2196,7 @@ type HoleMode {
 ///     implements the HasProperty check (step 5b) via elements.has and
 ///     calls the callback with (kValue, k, O) arguments (step 5c.ii).
 ///   - Step 6: return undefined.
-pub fn array_for_each(
+fn array_for_each(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2252,7 +2252,7 @@ pub fn array_for_each(
 ///     on the accumulator elements (equivalent for dense arrays).
 ///   - Step 7: finish_array allocates the result array with the collected
 ///     elements and the original length.
-pub fn array_map(
+fn array_map(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2367,7 +2367,7 @@ fn finish_list(
 ///   - Step 7c.ii: ToBoolean is done via value.is_truthy.
 ///   - Step 8: result array is allocated via common.alloc_array from the
 ///     reversed kept list — contiguous, no holes.
-pub fn array_filter(
+fn array_filter(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2415,7 +2415,7 @@ pub fn array_filter(
 ///         iii. If testResult is false, return false.
 ///      d. Set k to k + 1.
 ///   6. Return true.
-pub fn array_every(
+fn array_every(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2458,7 +2458,7 @@ pub fn array_every(
 ///         iii. If testResult is true, return true.
 ///      d. Set k to k + 1.
 ///   6. Return false.
-pub fn array_some(
+fn array_some(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2505,7 +2505,7 @@ pub fn array_some(
 ///
 /// Note: FindViaPredicate step 4b uses Get (not HasProperty + Get). This means
 /// holes are visited as undefined, not skipped — hence VisitHoles mode.
-pub fn array_find(
+fn array_find(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2546,7 +2546,7 @@ pub fn array_find(
 /// Uses the same FindViaPredicate (§23.1.3.9.1) as Array.prototype.find — see
 /// that function's doc comment for the full algorithm. The only difference is
 /// step 4: find returns [[Value]], findIndex returns [[Index]].
-pub fn array_find_index(
+fn array_find_index(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -2593,7 +2593,7 @@ pub fn array_find_index(
 ///    a. Perform ? DeletePropertyOrThrow(obj, ! ToString(𝔽(j))).
 ///    b. Set j to j + 1.
 /// 9. Return obj.
-pub fn array_sort(
+fn array_sort(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3124,7 +3124,7 @@ fn fold_loop(
 ///    d. Set k to k + 1.
 /// 10. Return accumulator.
 ///
-pub fn array_reduce(
+fn array_reduce(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3206,7 +3206,7 @@ pub fn array_reduce(
 ///    d. Set k to k - 1.
 /// 10. Return accumulator.
 ///
-pub fn array_reduce_right(
+fn array_reduce_right(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3364,7 +3364,7 @@ fn reduce_loop(
 /// 6. Else, let actualStart = min(relativeStart, len).
 /// 7-10. Compute actualDeleteCount depending on argument count.
 /// 11-18. Build removed array, shift elements, insert items, set length.
-pub fn array_splice(
+fn array_splice(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3563,7 +3563,7 @@ fn splice_insert(
 ///
 /// Like find() but searches from end to start.
 /// Uses FindViaPredicate with direction = descending.
-pub fn array_find_last(
+fn array_find_last(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3597,7 +3597,7 @@ pub fn array_find_last(
 /// ES2024 §23.1.3.12
 ///
 /// Like findIndex() but searches from end to start.
-pub fn array_find_last_index(
+fn array_find_last_index(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3640,7 +3640,7 @@ pub fn array_find_last_index(
 /// 6. Let A be ? ArraySpeciesCreate(O, 0).
 /// 7. Perform ? FlattenIntoArray(A, O, sourceLen, 0, depthNum).
 /// 8. Return A.
-pub fn array_flat(
+fn array_flat(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3752,7 +3752,7 @@ fn is_array_value(val: JsValue, h: Heap) -> Option(#(Int, JsElements)) {
 /// 4. Let A be ? ArraySpeciesCreate(O, 0).
 /// 5. Perform ? FlattenIntoArray(A, O, sourceLen, 0, 1, mapperFunction, thisArg).
 /// 6. Return A.
-pub fn array_flat_map(
+fn array_flat_map(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3824,7 +3824,7 @@ fn collect_flat(
 /// 12. Let count be min(final - from, len - to).
 /// 13-15. Handle copy direction to avoid overlap issues.
 /// 16. Return O.
-pub fn array_copy_within(
+fn array_copy_within(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -3933,7 +3933,7 @@ fn copy_within_backward(
 ///
 /// Simplified: handles arrays and array-like objects (objects with .length).
 /// Iterator protocol support is not yet implemented.
-pub fn array_from(
+fn array_from(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -4195,7 +4195,7 @@ fn array_from_mapped_loop(
 /// Creates a new Array instance from a variable number of arguments,
 /// regardless of number or type of the arguments.
 /// Unlike Array(), Array.of(7) creates [7] not an array with length 7.
-pub fn array_of(
+fn array_of(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -4239,7 +4239,7 @@ pub fn array_of(
 ///  10. Let A be ? ArrayCreate(newLen).
 ///  11-14. Copy elements [0, actualStart), then items, then [actualStart+actualSkipCount, len).
 ///  15. Return A.
-pub fn array_to_spliced(
+fn array_to_spliced(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -4327,7 +4327,7 @@ fn insert_items(
 ///   7. Let A be ? ArrayCreate(len).
 ///   8-11. Copy all elements, replacing actualIndex with value.
 ///  12. Return A.
-pub fn array_with(
+fn array_with(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -4389,7 +4389,7 @@ pub fn array_with(
 ///   4. Let A be ? ArrayCreate(len).
 ///   5. Sort a copy of the elements using SortCompare.
 ///   6. Return A.
-pub fn array_to_sorted(
+fn array_to_sorted(
   this: JsValue,
   args: List(JsValue),
   state: State,
@@ -4509,7 +4509,7 @@ fn build_elements_from_list(
 ///      d. Perform ? CreateDataPropertyOrThrow(A, Pk, fromValue).
 ///      e. Set k to k + 1.
 ///   6. Return A.
-pub fn array_to_reversed(
+fn array_to_reversed(
   this: JsValue,
   _args: List(JsValue),
   state: State,

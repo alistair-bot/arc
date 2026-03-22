@@ -83,7 +83,7 @@ pub fn dispatch(
 ///
 /// Note: ToBoolean is implemented by value.is_truthy. When no argument
 /// is provided, value defaults to undefined which is falsy (step 1).
-pub fn call_as_function(
+fn call_as_function(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -103,7 +103,7 @@ pub fn call_as_function(
 /// Correctly implements spec: delegates entirely to thisBooleanValue,
 /// which handles both primitive booleans and Boolean wrapper objects.
 /// Throws TypeError if this is neither.
-pub fn boolean_value_of(
+fn boolean_value_of(
   this: JsValue,
   _args: List(JsValue),
   state: State,
@@ -126,7 +126,7 @@ pub fn boolean_value_of(
 ///
 /// Correctly implements spec. The two-branch pattern (Some(True)/Some(False))
 /// maps directly to step 2.
-pub fn boolean_to_string(
+fn boolean_to_string(
   this: JsValue,
   _args: List(JsValue),
   state: State,

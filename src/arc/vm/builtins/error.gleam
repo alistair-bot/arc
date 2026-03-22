@@ -165,7 +165,7 @@ pub fn dispatch(
 /// Native error constructor: if (message !== undefined) this.message = message
 /// Creates a new error object with the proto embedded in the NativeFn.
 /// Per §20.5.6.3: "message" is writable+configurable but NOT enumerable.
-pub fn call_native(
+fn call_native(
   proto: Ref,
   args: List(JsValue),
   _this: JsValue,

@@ -6,6 +6,7 @@ import arc/vm/value.{
 }
 import gleam/int
 import gleam/option.{type Option, None, Some}
+import gleam/string
 
 /// ES2024 §7.2.3 IsCallable(argument)
 ///
@@ -79,19 +80,56 @@ pub fn to_number_int(val: JsValue) -> Option(Int) {
     // §7.1.4: true -> 1, false -> 0
     value.JsBool(True) -> Some(1)
     value.JsBool(False) -> Some(0)
-    // §7.1.4: String -> StringToNumber (partial — integer/float parse only)
-    JsString(s) ->
-      case int.parse(s) {
-        Ok(n) -> Some(n)
-        Error(_) ->
-          case gleam_stdlib_parse_float(s) {
-            Ok(f) -> Some(value.float_to_int(f))
-            // Non-numeric string -> NaN -> None
-            Error(_) -> None
-          }
-      }
+    // §7.1.4: String -> StringToNumber via StringNumericLiteral grammar
+    JsString(s) -> string_to_number_int(string.trim(s))
     // Objects would need ToPrimitive — not handled, returns None
     _ -> None
+  }
+}
+
+/// ES2024 §7.1.4.1.1 StringToNumber — parse a trimmed string as a number.
+/// Handles decimal integers, floats, hex (0x/0X), octal (0o/0O), binary (0b/0B),
+/// and empty string (→ 0).
+fn string_to_number_int(s: String) -> Option(Int) {
+  case s {
+    "" -> Some(0)
+    "0x" <> rest | "0X" <> rest -> int.base_parse(rest, 16) |> option.from_result
+    "0o" <> rest | "0O" <> rest -> int.base_parse(rest, 8) |> option.from_result
+    "0b" <> rest | "0B" <> rest -> int.base_parse(rest, 2) |> option.from_result
+    _ ->
+      case int.parse(s) {
+        Ok(n) -> Some(n)
+        Error(Nil) ->
+          case parse_js_float(s) {
+            Ok(f) -> Some(value.float_to_int(f))
+            Error(Nil) -> None
+          }
+      }
+  }
+}
+
+/// Parse a JS-style float string. Gleam's parse_float requires a decimal point,
+/// but JS allows "2E0", "1e3", etc. If the string has an exponent but no ".",
+/// insert ".0" before the exponent so Gleam's parser accepts it.
+fn parse_js_float(s: String) -> Result(Float, Nil) {
+  case gleam_stdlib_parse_float(s) {
+    Ok(f) -> Ok(f)
+    Error(Nil) ->
+      case string.contains(s, "e") || string.contains(s, "E") {
+        True ->
+          case string.contains(s, ".") {
+            True -> Error(Nil)
+            False -> {
+              // Insert ".0" before the exponent: "2E0" -> "2.0E0"
+              let fixed =
+                s
+                |> string.replace("e", ".0e")
+                |> string.replace("E", ".0E")
+              gleam_stdlib_parse_float(fixed)
+            }
+          }
+        False -> Error(Nil)
+      }
   }
 }
 

@@ -494,7 +494,13 @@ fn require_array(
           let #(state, elements) = case dict.is_empty(properties) {
             True -> #(state, elements)
             False ->
-              apply_property_overrides(state, this, properties, elements, length)
+              apply_property_overrides(
+                state,
+                this,
+                properties,
+                elements,
+                length,
+              )
           }
           cont(ref, length, elements, state)
         }
@@ -693,7 +699,11 @@ fn apply_property_overrides(
             }
           value.AccessorProperty(get: None, ..) -> #(
             state,
-            value.SparseElements(dict.insert(sparse_data, idx, value.JsUndefined)),
+            value.SparseElements(dict.insert(
+              sparse_data,
+              idx,
+              value.JsUndefined,
+            )),
           )
         }
       }

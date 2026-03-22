@@ -2854,34 +2854,38 @@ fn expression_to_pattern(expr: ast.Expression) -> Result(ast.Pattern, Nil) {
   case expr {
     ast.Identifier(name) -> Ok(ast.IdentifierPattern(name))
     ast.ArrayExpression(elements) -> {
-      use elems <- result.map(list.try_map(elements, fn(elem) {
-        case elem {
-          None -> Ok(None)
-          Some(ast.SpreadElement(arg)) -> {
-            use pat <- result.map(expression_to_pattern(arg))
-            Some(ast.RestElement(pat))
+      use elems <- result.map(
+        list.try_map(elements, fn(elem) {
+          case elem {
+            None -> Ok(None)
+            Some(ast.SpreadElement(arg)) -> {
+              use pat <- result.map(expression_to_pattern(arg))
+              Some(ast.RestElement(pat))
+            }
+            Some(e) -> {
+              use pat <- result.map(expression_to_pattern(e))
+              Some(pat)
+            }
           }
-          Some(e) -> {
-            use pat <- result.map(expression_to_pattern(e))
-            Some(pat)
-          }
-        }
-      }))
+        }),
+      )
       ast.ArrayPattern(elems)
     }
     ast.ObjectExpression(properties) -> {
-      use props <- result.map(list.try_map(properties, fn(prop) {
-        case prop {
-          ast.Property(key:, value:, computed:, shorthand:, ..) -> {
-            use val_pat <- result.map(expression_to_pattern(value))
-            ast.PatternProperty(key:, value: val_pat, computed:, shorthand:)
+      use props <- result.map(
+        list.try_map(properties, fn(prop) {
+          case prop {
+            ast.Property(key:, value:, computed:, shorthand:, ..) -> {
+              use val_pat <- result.map(expression_to_pattern(value))
+              ast.PatternProperty(key:, value: val_pat, computed:, shorthand:)
+            }
+            ast.SpreadProperty(argument:) -> {
+              use pat <- result.map(expression_to_pattern(argument))
+              ast.RestProperty(pat)
+            }
           }
-          ast.SpreadProperty(argument:) -> {
-            use pat <- result.map(expression_to_pattern(argument))
-            ast.RestProperty(pat)
-          }
-        }
-      }))
+        }),
+      )
       ast.ObjectPattern(props)
     }
     ast.AssignmentExpression(ast.Assign, left, right) -> {
@@ -2910,8 +2914,7 @@ fn emit_for_lhs_bind(
         _ -> Error(Unsupported("for-in/of with multiple declarators"))
       }
     }
-    ast.ForInitDeclaration(_) ->
-      Error(Unsupported("for-in/of left-hand side"))
+    ast.ForInitDeclaration(_) -> Error(Unsupported("for-in/of left-hand side"))
     ast.ForInitExpression(ast.ParenthesizedExpression(inner)) ->
       emit_for_lhs_bind(e, ast.ForInitExpression(unwrap_parens(inner)))
     ast.ForInitExpression(ast.Identifier(name)) -> {

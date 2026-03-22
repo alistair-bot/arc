@@ -1,4 +1,4 @@
-import { Ok, Error, List, toList } from './gleam.mjs';
+import { Ok, Error, toList } from './gleam.mjs';
 import { Some, None } from '../gleam_stdlib/gleam/option.mjs';
 
 // -- tuple_array: backed by plain JS Array on the JS target -----------------

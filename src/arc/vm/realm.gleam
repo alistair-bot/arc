@@ -35,7 +35,7 @@ pub type CallNativeFn =
 pub type NewStateFn =
   fn(
     FuncTemplate,
-    tuple_array.Array(JsValue),
+    tuple_array.TupleArray(JsValue),
     heap.Heap,
     Builtins,
     Ref,

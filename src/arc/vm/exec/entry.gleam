@@ -26,7 +26,7 @@ import gleam/set
 
 /// Result of module evaluation -- includes locals for export extraction.
 pub type ModuleResult {
-  ModuleOk(value: JsValue, heap: Heap, locals: tuple_array.Array(JsValue))
+  ModuleOk(value: JsValue, heap: Heap, locals: tuple_array.TupleArray(JsValue))
   ModuleThrow(value: JsValue, heap: Heap)
   ModuleError(error: VmError)
 }

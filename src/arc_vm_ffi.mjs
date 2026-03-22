@@ -50,6 +50,40 @@ export function array_grow(arr, new_size, default_) {
 	return grown;
 }
 
+// -- tree_array: same JS Array backing, tracks default for unset slots -------
+
+export function tree_array_new(default_) {
+	return { d: default_, a: [] };
+}
+export function tree_array_from_list(items, default_) {
+	return { d: default_, a: items.toArray() };
+}
+export function tree_array_to_list({ a }) {
+	return toList(a);
+}
+export function tree_array_get(index, { d, a }) {
+	if (index >= 0 && index < a.length) return a[index];
+	return d;
+}
+export function tree_array_get_option(index, { a }) {
+	if (index >= 0 && index < a.length) return new Some(a[index]);
+	return new None();
+}
+export function tree_array_set(index, value, { d, a }) {
+	if (index < 0 || index >= MAX_DENSE_ELEMENTS) return { d, a };
+	const copy = a.slice();
+	while (copy.length < index) copy.push(d);
+	copy[index] = value;
+	return { d, a: copy };
+}
+export function tree_array_size({ a }) {
+	return a.length;
+}
+export function tree_array_resize({ d, a }, new_size) {
+	if (new_size < 0) return { d, a };
+	return { d, a: a.slice(0, new_size) };
+}
+
 // -- Symbol identity: monotonic counter instead of make_ref() ----------------
 
 let ref_counter = 0;

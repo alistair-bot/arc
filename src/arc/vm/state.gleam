@@ -1,6 +1,6 @@
 import arc/vm/builtins/common.{type Builtins}
 import arc/vm/heap.{type Heap}
-import arc/vm/internal/tuple_array.{type Array}
+import arc/vm/internal/tuple_array.{type TupleArray}
 import arc/vm/limits
 import arc/vm/opcode.{type Op}
 import arc/vm/value.{type FuncTemplate, type JsValue, type Ref}
@@ -14,7 +14,7 @@ import gleam/set
 pub type CallFrame {
   CallFrame(
     func: FuncTemplate,
-    locals: Array(JsValue),
+    locals: TupleArray(JsValue),
     this: JsValue,
     env: Option(Ref),
     pc: Int,
@@ -42,7 +42,7 @@ pub type Vm {
   Vm(
     stack: List(JsValue),
     call_stack: List(CallFrame),
-    code: Array(Op),
+    code: TupleArray(Op),
     pc: Int,
     finally_stack: List(FinallyCompletion),
   )
@@ -52,7 +52,7 @@ pub type Vm {
 pub type SavedFrame {
   SavedFrame(
     func: FuncTemplate,
-    locals: Array(JsValue),
+    locals: TupleArray(JsValue),
     stack: List(JsValue),
     pc: Int,
     try_stack: List(TryFrame),
@@ -76,8 +76,8 @@ pub type SavedFrame {
 pub type State {
   State(
     stack: List(JsValue),
-    locals: Array(JsValue),
-    constants: Array(JsValue),
+    locals: TupleArray(JsValue),
+    constants: TupleArray(JsValue),
     /// DeclarativeRecord: let/const at global scope. NOT on globalThis. Checked first.
     lexical_globals: dict.Dict(String, JsValue),
     /// Tracks which lexical globals are const (PutGlobal throws TypeError).
@@ -85,7 +85,7 @@ pub type State {
     /// ObjectRecord: Ref to globalThis heap object. var/function/builtins live here.
     global_object: Ref,
     func: FuncTemplate,
-    code: Array(Op),
+    code: TupleArray(Op),
     heap: Heap,
     pc: Int,
     call_stack: List(SavedFrame),

@@ -537,7 +537,7 @@ fn collect_exports(
   specifier_map: Dict(String, String),
   export_entries: List(compiler.ExportEntry),
   scope_dict: Dict(String, Int),
-  locals: tuple_array.Array(JsValue),
+  locals: tuple_array.TupleArray(JsValue),
   heap: Heap,
 ) -> #(Dict(String, JsValue), Heap) {
   list.fold(export_entries, #(dict.new(), heap), fn(acc, entry) {

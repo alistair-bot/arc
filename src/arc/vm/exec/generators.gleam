@@ -460,7 +460,7 @@ type GenData {
     func_template: FuncTemplate,
     env_ref: Ref,
     saved_pc: Int,
-    saved_locals: tuple_array.Array(JsValue),
+    saved_locals: tuple_array.TupleArray(JsValue),
     saved_stack: List(JsValue),
     saved_try_stack: List(value.SavedTryFrame),
     saved_finally_stack: List(value.SavedFinallyCompletion),
@@ -531,7 +531,7 @@ fn gen_with_state(
 /// try/finally handler (identified by EnterFinallyThrow at catch_target).
 /// Returns Some(#(catch_target, stack_depth, remaining_try_stack)) or None.
 fn find_next_finally(
-  code: tuple_array.Array(Op),
+  code: tuple_array.TupleArray(Op),
   try_stack: List(TryFrame),
 ) -> Option(#(Int, Int, List(TryFrame))) {
   case try_stack {

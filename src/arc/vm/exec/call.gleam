@@ -783,7 +783,7 @@ pub fn setup_locals(
   env_ref: value.Ref,
   callee_template: FuncTemplate,
   args: List(JsValue),
-) -> tuple_array.Array(JsValue) {
+) -> tuple_array.TupleArray(JsValue) {
   let env_values = heap.read_env(h, env_ref) |> option.unwrap([])
   let env_count = list.length(env_values)
   let padded_args = pad_args(args, callee_template.arity)

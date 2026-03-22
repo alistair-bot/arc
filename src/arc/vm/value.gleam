@@ -1,4 +1,5 @@
-import arc/vm/internal/tuple_array.{type Array}
+import arc/vm/internal/tree_array.{type TreeArray}
+import arc/vm/internal/tuple_array.{type TupleArray}
 import arc/vm/opcode.{type Op}
 import gleam/bool
 import gleam/dict.{type Dict}
@@ -93,9 +94,9 @@ pub type FuncTemplate {
     name: Option(String),
     arity: Int,
     local_count: Int,
-    bytecode: Array(Op),
-    constants: Array(JsValue),
-    functions: Array(FuncTemplate),
+    bytecode: TupleArray(Op),
+    constants: TupleArray(JsValue),
+    functions: TupleArray(FuncTemplate),
     env_descriptors: List(EnvCapture),
     is_strict: Bool,
     is_arrow: Bool,
@@ -234,12 +235,14 @@ pub type JsValue {
 
 /// Dual-representation JS array elements.
 ///
-/// Dense: Erlang tuple — O(1) get, O(n) set (single BIF). For normal arrays.
-/// Sparse: Dict — O(log n) get/set. For arrays with huge gaps (e.g. `a[100000] = 1`).
+/// Dense: Erlang's `array` module — O(log n) get/set, ~5× tuple memory.
+/// Sequential append is n·log(n) not n² (tuple set is O(n) copy on BEAM).
+/// Sparse: Dict — O(log n) get/set, ~75× tuple memory. Only for arrays with
+/// huge gaps (e.g. `a[100000] = 1`) or deleted elements (holes).
 ///
-/// Operations on this type are in `arc/vm/js_elements`.
+/// Operations on this type are in `arc/vm/internal/elements`.
 pub type JsElements {
-  DenseElements(data: Array(JsValue))
+  DenseElements(data: TreeArray(JsValue))
   SparseElements(data: Dict(Int, JsValue))
 }
 
@@ -1102,7 +1105,7 @@ pub type HeapSlot {
     func_template: FuncTemplate,
     env_ref: Ref,
     saved_pc: Int,
-    saved_locals: Array(JsValue),
+    saved_locals: TupleArray(JsValue),
     saved_stack: List(JsValue),
     saved_try_stack: List(SavedTryFrame),
     saved_finally_stack: List(SavedFinallyCompletion),
@@ -1118,7 +1121,7 @@ pub type HeapSlot {
     func_template: FuncTemplate,
     env_ref: Ref,
     saved_pc: Int,
-    saved_locals: Array(JsValue),
+    saved_locals: TupleArray(JsValue),
     saved_stack: List(JsValue),
     saved_try_stack: List(SavedTryFrame),
     saved_finally_stack: List(SavedFinallyCompletion),
@@ -1136,7 +1139,7 @@ pub type HeapSlot {
     func_template: FuncTemplate,
     env_ref: Ref,
     saved_pc: Int,
-    saved_locals: Array(JsValue),
+    saved_locals: TupleArray(JsValue),
     saved_stack: List(JsValue),
     saved_try_stack: List(SavedTryFrame),
     saved_finally_stack: List(SavedFinallyCompletion),
@@ -1292,7 +1295,7 @@ pub fn refs_in_slot(slot: HeapSlot) -> List(Ref) {
         |> list.flat_map(refs_in_property)
       let elem_refs = case elements {
         DenseElements(data) ->
-          tuple_array.to_list(data) |> list.flat_map(refs_in_value)
+          tree_array.to_list(data) |> list.flat_map(refs_in_value)
         SparseElements(data) ->
           dict.values(data) |> list.flat_map(refs_in_value)
       }

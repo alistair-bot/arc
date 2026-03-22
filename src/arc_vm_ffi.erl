@@ -1,6 +1,9 @@
 -module(arc_vm_ffi).
 -export([read_line/1]).
 -export([array_get/2, array_set/3, array_repeat/2, array_grow/3]).
+-export([tree_array_new/1, tree_array_from_list/2, tree_array_to_list/1,
+         tree_array_get/2, tree_array_get_option/2, tree_array_set/3,
+         tree_array_size/1, tree_array_resize/2]).
 -export([send_message/2, receive_message_infinite/0, receive_message_timeout/1, pid_to_string/1]).
 -export([receive_any_event/0, receive_settle_only/0, send_after/3, cancel_timer/1]).
 -export([receive_user_message/0, receive_user_message_timeout/1]).
@@ -47,6 +50,39 @@ array_grow(Tuple, NewSize, Default) when NewSize =< ?MAX_DENSE_ELEMENTS ->
     end;
 array_grow(_Tuple, _NewSize, _Default) ->
     erlang:error(array_too_large).
+
+%% Erlang's array module — O(log n) functional array for JS elements.
+%% Default is the caller-provided JsUndefined so unset slots and to_list
+%% both return valid JsValues (no atom sentinel leaks into Gleam).
+tree_array_new(Default) ->
+    array:new({default, Default}).
+tree_array_from_list(List, Default) ->
+    array:from_list(List, Default).
+tree_array_to_list(A) ->
+    array:to_list(A).
+tree_array_get(Index, A) when Index >= 0 ->
+    array:get(Index, A);
+tree_array_get(_Index, A) ->
+    array:default(A).
+%% DenseElements has no holes by design (delete promotes to sparse), so
+%% "in bounds" = "has value". Out-of-bounds or negative index = none.
+tree_array_get_option(Index, A) when Index >= 0 ->
+    case Index < array:size(A) of
+        true -> {some, array:get(Index, A)};
+        false -> none
+    end;
+tree_array_get_option(_Index, _A) ->
+    none.
+tree_array_set(Index, Value, A) when Index >= 0, Index < ?MAX_DENSE_ELEMENTS ->
+    array:set(Index, Value, A);
+tree_array_set(_Index, _Value, A) ->
+    A.
+tree_array_size(A) ->
+    array:size(A).
+tree_array_resize(A, NewSize) when NewSize >= 0 ->
+    array:resize(NewSize, A);
+tree_array_resize(A, _NewSize) ->
+    A.
 
 %% Process primitives for Arc.send/receive
 send_message(Pid, Msg) -> Pid ! Msg, nil.

@@ -2,7 +2,7 @@
 ///
 /// The type itself is defined in `arc/vm/value` (to avoid import cycles).
 /// This module provides all operations: new, from_list, get, set, delete, etc.
-import arc/vm/internal/tuple_array
+import arc/vm/internal/tree_array
 import arc/vm/value.{
   type JsElements, type JsValue, DenseElements, JsUndefined, SparseElements,
 }
@@ -13,21 +13,14 @@ import gleam/result
 
 const max_gap = 1024
 
-/// Dense arrays promote to sparse above this size on write. Tuple set/grow
-/// are O(n) copy on BEAM — sequential append becomes O(n²). Dict insert is
-/// O(log n). Reads pay O(log n) vs O(1), but write-heavy loops (e.g.
-/// test262's buildString filling 10k-element chunks) go from quadratic to
-/// n·log(n).
-const dense_write_limit = 32
-
 /// Empty elements (for non-array objects and empty arrays).
 pub fn new() -> JsElements {
-  DenseElements(tuple_array.from_list([]))
+  DenseElements(tree_array.new(JsUndefined))
 }
 
 /// Build dense elements from a list of values.
 pub fn from_list(items: List(JsValue)) -> JsElements {
-  DenseElements(tuple_array.from_list(items))
+  DenseElements(tree_array.from_list(items, JsUndefined))
 }
 
 /// Build sparse elements from #(index, value) pairs. Produces a dict-backed
@@ -40,8 +33,7 @@ pub fn from_indexed(items: List(#(Int, JsValue))) -> JsElements {
 /// Get element at index. Returns JsUndefined for missing/out-of-bounds.
 pub fn get(elements: JsElements, index: Int) -> JsValue {
   case elements {
-    DenseElements(data) ->
-      tuple_array.get(index, data) |> option.unwrap(JsUndefined)
+    DenseElements(data) -> tree_array.get(index, data)
     SparseElements(data) -> dict.get(data, index) |> result.unwrap(JsUndefined)
   }
 }
@@ -49,11 +41,7 @@ pub fn get(elements: JsElements, index: Int) -> JsValue {
 /// Get element as Option (for has_key semantics and property descriptors).
 pub fn get_option(elements: JsElements, index: Int) -> Option(JsValue) {
   case elements {
-    DenseElements(data) ->
-      case index >= 0 && index < tuple_array.size(data) {
-        True -> tuple_array.get(index, data)
-        False -> None
-      }
+    DenseElements(data) -> tree_array.get_option(index, data)
     SparseElements(data) ->
       case dict.get(data, index) {
         Ok(val) -> Some(val)
@@ -65,7 +53,7 @@ pub fn get_option(elements: JsElements, index: Int) -> Option(JsValue) {
 /// Check if an element exists at index.
 pub fn has(elements: JsElements, index: Int) -> Bool {
   case elements {
-    DenseElements(data) -> index >= 0 && index < tuple_array.size(data)
+    DenseElements(data) -> index >= 0 && index < tree_array.size(data)
     SparseElements(data) -> dict.has_key(data, index)
   }
 }
@@ -74,28 +62,14 @@ pub fn has(elements: JsElements, index: Int) -> Bool {
 pub fn set(elements: JsElements, index: Int, val: JsValue) -> JsElements {
   case elements {
     DenseElements(data) -> {
-      let size = tuple_array.size(data)
-      case index < size, size >= dense_write_limit {
-        True, False ->
-          case tuple_array.set(index, val, data) {
-            Ok(new_data) -> DenseElements(new_data)
-            Error(_) -> elements
-          }
-        _, True ->
-          // Large dense array: tuple set/grow are O(n) copy. Promote to
-          // sparse so subsequent writes are O(log n).
+      let size = tree_array.size(data)
+      case index - size > max_gap {
+        True ->
+          // Large gap → sparse. Dense-with-holes would waste memory.
           SparseElements(dense_to_sparse(data) |> dict.insert(index, val))
-        False, False ->
-          case index - size > max_gap {
-            True ->
-              SparseElements(dense_to_sparse(data) |> dict.insert(index, val))
-            False -> {
-              let grown = tuple_array.grow(data, index + 1, JsUndefined)
-              DenseElements(
-                tuple_array.set(index, val, grown) |> result.unwrap(grown),
-              )
-            }
-          }
+        False ->
+          // tree_array.set is O(log n) and auto-grows.
+          DenseElements(tree_array.set(index, val, data))
       }
     }
     SparseElements(data) -> SparseElements(dict.insert(data, index, val))
@@ -115,7 +89,7 @@ pub fn delete(elements: JsElements, index: Int) -> JsElements {
 /// Get all values as a list (for GC ref tracing).
 pub fn values(elements: JsElements) -> List(JsValue) {
   case elements {
-    DenseElements(data) -> tuple_array.to_list(data)
+    DenseElements(data) -> tree_array.to_list(data)
     SparseElements(data) -> dict.values(data)
   }
 }
@@ -123,31 +97,28 @@ pub fn values(elements: JsElements) -> List(JsValue) {
 /// Number of stored entries. NOT JS .length — use ArrayObject(length:) for that.
 pub fn stored_count(elements: JsElements) -> Int {
   case elements {
-    DenseElements(data) -> tuple_array.size(data)
+    DenseElements(data) -> tree_array.size(data)
     SparseElements(data) -> dict.size(data)
   }
 }
 
-/// Remove all elements at indices >= new_len. O(stored_count) not O(old_len).
+/// Remove all elements at indices >= new_len. O(log n).
 pub fn truncate(elements: JsElements, new_len: Int) -> JsElements {
   case elements {
     DenseElements(data) ->
-      case new_len >= tuple_array.size(data) {
+      case new_len >= tree_array.size(data) {
         True -> elements
-        False ->
-          DenseElements(
-            tuple_array.to_list(data)
-            |> list.take(new_len)
-            |> tuple_array.from_list(),
-          )
+        False -> DenseElements(tree_array.resize(data, new_len))
       }
     SparseElements(data) ->
       SparseElements(dict.filter(data, fn(idx, _val) { idx < new_len }))
   }
 }
 
-fn dense_to_sparse(data: tuple_array.Array(JsValue)) -> dict.Dict(Int, JsValue) {
-  tuple_array.to_list(data)
+fn dense_to_sparse(
+  data: tree_array.TreeArray(JsValue),
+) -> dict.Dict(Int, JsValue) {
+  tree_array.to_list(data)
   |> list.index_map(fn(val, idx) { #(idx, val) })
   |> dict.from_list()
 }

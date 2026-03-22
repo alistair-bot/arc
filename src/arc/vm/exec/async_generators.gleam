@@ -511,7 +511,7 @@ type AsyncGenData {
     func_template: value.FuncTemplate,
     env_ref: Ref,
     saved_pc: Int,
-    saved_locals: tuple_array.Array(JsValue),
+    saved_locals: tuple_array.TupleArray(JsValue),
     saved_stack: List(JsValue),
     saved_try_stack: List(value.SavedTryFrame),
     saved_finally_stack: List(value.SavedFinallyCompletion),

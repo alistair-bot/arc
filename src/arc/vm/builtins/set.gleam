@@ -10,7 +10,6 @@ import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers.{first_arg}
 import arc/vm/heap.{type Heap}
 import arc/vm/internal/elements
-import arc/vm/internal/tuple_array as vm_array
 import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type MapKey, type Ref, type SetNativeFn, AccessorProperty,
@@ -182,18 +181,7 @@ fn read_array_elements(
   case idx >= length {
     True -> list.reverse(acc)
     False -> {
-      let val = case elements {
-        value.DenseElements(data) ->
-          case vm_array.get(idx, data) {
-            Some(v) -> v
-            None -> JsUndefined
-          }
-        value.SparseElements(data) ->
-          case dict.get(data, idx) {
-            Ok(v) -> v
-            Error(Nil) -> JsUndefined
-          }
-      }
+      let val = elements.get(elements, idx)
       read_array_elements(elements, idx + 1, length, [val, ..acc])
     }
   }

@@ -178,7 +178,7 @@ fn construct_fn_callback(
 /// for cases that need non-default this_binding or symbol_descriptions.
 pub fn new_state(
   func: FuncTemplate,
-  locals: tuple_array.Array(JsValue),
+  locals: tuple_array.TupleArray(JsValue),
   heap: Heap,
   builtins: Builtins,
   global_object: Ref,

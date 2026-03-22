@@ -137,6 +137,11 @@ pub type State {
     /// Whether the event loop is active. When False, APIs that require the
     /// event loop (Arc.receiveAsync, Arc.setTimeout) throw a TypeError.
     event_loop: Bool,
+    /// Refs currently being snapshotted by require_array. If a getter invoked
+    /// during apply_property_overrides calls another array method on the same
+    /// ref, the inner require_array sees the ref here and skips accessor
+    /// resolution, breaking the getter → push → require_array → getter cycle.
+    snapshotting: set.Set(Ref),
   )
 }
 

@@ -27,6 +27,7 @@ import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
 import gleam/result
+import gleam/set
 import gleam/string
 
 /// Set up Array.prototype and Array constructor.
@@ -492,18 +493,35 @@ fn require_array(
         // Real array — length from [[ArrayLength]]. Check properties dict
         // for accessor overrides on numeric indices (from Object.defineProperty).
         Some(ObjectSlot(kind: ArrayObject(length:), elements:, properties:, ..)) -> {
-          // Fast path: skip property override scan when no named properties exist
-          // (the common case — arrays rarely have Object.defineProperty overrides)
-          let #(state, elements) = case dict.is_empty(properties) {
+          // Fast path: skip property override scan when no named properties
+          // exist (common case) OR when we're already snapshotting this ref
+          // (a getter called an array method on `this` — break the recursion
+          // by returning raw elements; the inner method sees pre-getter state).
+          let skip =
+            dict.is_empty(properties) || set.contains(state.snapshotting, ref)
+          let #(state, elements) = case skip {
             True -> #(state, elements)
-            False ->
-              apply_property_overrides(
-                state,
-                this,
-                properties,
-                elements,
-                length,
-              )
+            False -> {
+              let state =
+                State(
+                  ..state,
+                  snapshotting: set.insert(state.snapshotting, ref),
+                )
+              let #(state, elements) =
+                apply_property_overrides(
+                  state,
+                  this,
+                  properties,
+                  elements,
+                  length,
+                )
+              let state =
+                State(
+                  ..state,
+                  snapshotting: set.delete(state.snapshotting, ref),
+                )
+              #(state, elements)
+            }
           }
           cont(ref, length, elements, state)
         }
@@ -690,6 +708,9 @@ fn apply_property_overrides(
             value.SparseElements(dict.insert(sparse_data, idx, v)),
           )
           value.AccessorProperty(get: Some(getter), ..) ->
+            // If the getter calls an array method on `this`, the inner
+            // require_array sees `ref` in state.snapshotting and skips
+            // accessor resolution — the recursion is bounded to depth 1.
             case state.call(state, getter, this, []) {
               Ok(#(v, state)) -> #(
                 state,

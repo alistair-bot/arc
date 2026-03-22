@@ -211,12 +211,7 @@ spawn_worker({Name, Fun}, Parent, Ref, Feeder, FeedRef) ->
             end,
             Self ! {TestRef, Res}
         end),
-        %% A handful of test262 tests iterate 0..0x10FFFF codepoints and take
-        %% ~20-25s under parallel load. Unit tests complete well under 5s.
-        Timeout = case binary:match(Name, <<"test262/">>) of
-            nomatch -> 10000;
-            _ -> 30000
-        end,
+        Timeout = timeout_for(Name),
         Result = receive
             {TestRef, R} -> R;
             {'EXIT', Pid, killed} -> {error, {error, heap_limit_exceeded, []}}
@@ -318,3 +313,27 @@ to_list(V) when is_binary(V) -> binary_to_list(V);
 to_list(V) when is_atom(V) -> atom_to_list(V);
 to_list(V) when is_list(V) -> V;
 to_list(V) -> lists:flatten(io_lib:format("~p", [V])).
+
+%% Per-test timeout. Unit tests get 10s. test262 gets 30s except for a handful
+%% of codepoint-iteration tests that take 80-100s locally / 400+s on CI
+%% (they iterate 0..0x10FFFF building/matching giant strings).
+timeout_for(Name) ->
+    case binary:match(Name, <<"test262/">>) of
+        nomatch -> 10000;
+        _ ->
+            case is_slow_test(Name) of
+                true -> 600000;
+                false -> 30000
+            end
+    end.
+
+is_slow_test(Name) ->
+    Slow = [
+        <<"RegExp/CharacterClassEscapes/character-class-">>,
+        <<"decodeURI/S15.1.3.1_A2.5_T1">>,
+        <<"decodeURIComponent/S15.1.3.2_A2.5_T1">>,
+        <<"encodeURI/S15.1.3.3_A2.3_T1">>,
+        <<"encodeURIComponent/S15.1.3.4_A2.3_T1">>,
+        <<"sm/regress/regress-610026">>
+    ],
+    lists:any(fun(P) -> binary:match(Name, P) =/= nomatch end, Slow).

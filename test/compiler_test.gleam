@@ -8,6 +8,10 @@ import arc/vm/object
 import arc/vm/value.{
   Finite, JsBool, JsNull, JsNumber, JsString, JsUndefined, NaN,
 }
+import arc/vm/completion.{
+  type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
+}
+import arc/vm/frame
 import arc/vm/vm
 import gleam/dict
 import gleam/int
@@ -20,7 +24,7 @@ import gleam/string
 // ============================================================================
 
 /// Parse + compile + run JS source, return the completion value.
-fn run_js(source: String) -> Result(vm.Completion, String) {
+fn run_js(source: String) -> Result(Completion, String) {
   case parser.parse(source, parser.Script) {
     Error(err) -> Error("parse error: " <> parser.parse_error_to_string(err))
     Ok(program) ->
@@ -45,7 +49,7 @@ fn run_js(source: String) -> Result(vm.Completion, String) {
 }
 
 /// Like run_js but drains the promise job queue after script completes.
-fn run_js_drain(source: String) -> Result(vm.Completion, String) {
+fn run_js_drain(source: String) -> Result(Completion, String) {
   case parser.parse(source, parser.Script) {
     Error(err) -> Error("parse error: " <> parser.parse_error_to_string(err))
     Ok(program) ->
@@ -73,7 +77,7 @@ fn run_js_drain(source: String) -> Result(vm.Completion, String) {
 /// is fulfilled with the expected value.
 fn assert_promise_resolves(source: String, expected: value.JsValue) -> Nil {
   case run_js_drain(source) {
-    Ok(vm.NormalCompletion(val, h)) ->
+    Ok(NormalCompletion(val, h)) ->
       case vm.promise_result(h, val) {
         Some(resolved) -> {
           assert resolved == expected
@@ -86,21 +90,21 @@ fn assert_promise_resolves(source: String, expected: value.JsValue) -> Nil {
             <> source
           }
       }
-    Ok(vm.ThrowCompletion(val, _)) ->
+    Ok(ThrowCompletion(val, _)) ->
       panic as {
         "expected NormalCompletion, got ThrowCompletion("
         <> string.inspect(val)
         <> ") for: "
         <> source
       }
-    Ok(vm.YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
+    Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
     Error(err) -> panic as { "error for: " <> source <> " — " <> err }
   }
 }
 
 fn assert_promise_rejects(source: String, expected: value.JsValue) -> Nil {
   case run_js_drain(source) {
-    Ok(vm.NormalCompletion(val, h)) ->
+    Ok(NormalCompletion(val, h)) ->
       case vm.promise_result(h, val) {
         Some(rejected) -> {
           assert rejected == expected
@@ -113,38 +117,38 @@ fn assert_promise_rejects(source: String, expected: value.JsValue) -> Nil {
             <> source
           }
       }
-    Ok(vm.ThrowCompletion(val, _)) ->
+    Ok(ThrowCompletion(val, _)) ->
       panic as {
         "expected NormalCompletion, got ThrowCompletion("
         <> string.inspect(val)
         <> ") for: "
         <> source
       }
-    Ok(vm.YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
+    Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
     Error(err) -> panic as { "error for: " <> source <> " — " <> err }
   }
 }
 
-fn inspect_vm_error(err: vm.VmError) -> String {
+fn inspect_vm_error(err: frame.VmError) -> String {
   case err {
-    vm.PcOutOfBounds(pc) -> "PcOutOfBounds(" <> pc |> int.to_string <> ")"
-    vm.StackUnderflow(op) -> "StackUnderflow(" <> op <> ")"
-    vm.LocalIndexOutOfBounds(i) ->
+    frame.PcOutOfBounds(pc) -> "PcOutOfBounds(" <> pc |> int.to_string <> ")"
+    frame.StackUnderflow(op) -> "StackUnderflow(" <> op <> ")"
+    frame.LocalIndexOutOfBounds(i) ->
       "LocalIndexOutOfBounds(" <> i |> int.to_string <> ")"
-    vm.Unimplemented(op) -> "Unimplemented(" <> op <> ")"
+    frame.Unimplemented(op) -> "Unimplemented(" <> op <> ")"
   }
 }
 
 fn assert_normal(source: String, expected: value.JsValue) -> Nil {
   case run_js(source) {
-    Ok(vm.NormalCompletion(val, _)) -> {
+    Ok(NormalCompletion(val, _)) -> {
       assert val == expected
     }
-    Ok(vm.ThrowCompletion(_, _)) ->
+    Ok(ThrowCompletion(_, _)) ->
       panic as {
         "expected NormalCompletion, got ThrowCompletion for: " <> source
       }
-    Ok(vm.YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
+    Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
     Error(err) -> panic as { "error for: " <> source <> " — " <> err }
   }
 }
@@ -155,15 +159,15 @@ fn assert_normal_number(source: String, expected: Float) -> Nil {
 
 fn assert_thrown(source: String) -> Nil {
   case run_js(source) {
-    Ok(vm.ThrowCompletion(_, _)) -> Nil
-    Ok(vm.NormalCompletion(val, _)) ->
+    Ok(ThrowCompletion(_, _)) -> Nil
+    Ok(NormalCompletion(val, _)) ->
       panic as {
         "expected ThrowCompletion, got NormalCompletion("
         <> string.inspect(val)
         <> ") for: "
         <> source
       }
-    Ok(vm.YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
+    Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
     Error(err) -> panic as { "error for: " <> source <> " — " <> err }
   }
 }
@@ -401,7 +405,7 @@ pub fn ternary_false_test() -> Nil {
 pub fn empty_object_test() -> Nil {
   // Just test that it doesn't crash — the result is an object ref
   case run_js("({})") {
-    Ok(vm.NormalCompletion(value.JsObject(_), _)) -> Nil
+    Ok(NormalCompletion(value.JsObject(_), _)) -> Nil
     _other -> panic as { "expected object, got something else" }
   }
 }
@@ -941,7 +945,7 @@ pub fn try_finally_normal_test() -> Nil {
 pub fn try_finally_throw_test() -> Nil {
   // Finally runs even when exception is thrown, then re-throws
   case run_js("var x = 0; try { x = 1; throw 42; } finally { x = 10; }") {
-    Ok(vm.ThrowCompletion(JsNumber(Finite(42.0)), _)) -> Nil
+    Ok(ThrowCompletion(JsNumber(Finite(42.0)), _)) -> Nil
     other ->
       panic as { "expected ThrowCompletion(42): " <> string.inspect(other) }
   }
@@ -968,7 +972,7 @@ pub fn try_catch_finally_rethrow_test() -> Nil {
       "var x = 0; try { throw 42; } catch(e) { throw e + 1; } finally { x = 99; }",
     )
   {
-    Ok(vm.ThrowCompletion(JsNumber(Finite(43.0)), _)) -> Nil
+    Ok(ThrowCompletion(JsNumber(Finite(43.0)), _)) -> Nil
     other ->
       panic as { "expected ThrowCompletion(43): " <> string.inspect(other) }
   }
@@ -980,8 +984,8 @@ pub fn try_catch_finally_rethrow_test() -> Nil {
 
 pub fn uncaught_throw_test() -> Nil {
   case run_js("throw 42") {
-    Ok(vm.ThrowCompletion(JsNumber(Finite(42.0)), _)) -> Nil
-    Ok(vm.NormalCompletion(_, _)) ->
+    Ok(ThrowCompletion(JsNumber(Finite(42.0)), _)) -> Nil
+    Ok(NormalCompletion(_, _)) ->
       panic as "expected ThrowCompletion, got NormalCompletion"
     other -> panic as { "unexpected result: " <> string.inspect(other) }
   }
@@ -1206,7 +1210,7 @@ pub fn closure_param_mutation_test() -> Nil {
 pub fn array_literal_test() -> Nil {
   // Array literal produces an object
   case run_js("[1, 2, 3]") {
-    Ok(vm.NormalCompletion(value.JsObject(_), _)) -> Nil
+    Ok(NormalCompletion(value.JsObject(_), _)) -> Nil
     _other -> panic as "expected array object"
   }
 }
@@ -5813,11 +5817,11 @@ fn eval_repl_line(
           Error("compile error: continue outside loop")
         Ok(template) ->
           case vm.run_and_drain_repl(template, h, b, env) {
-            Ok(#(vm.NormalCompletion(val, new_h), new_env)) ->
+            Ok(#(NormalCompletion(val, new_h), new_env)) ->
               Ok(#(val, new_h, new_env))
-            Ok(#(vm.ThrowCompletion(val, _), _)) ->
+            Ok(#(ThrowCompletion(val, _), _)) ->
               Error("throw: " <> string.inspect(val))
-            Ok(#(vm.YieldCompletion(_, _), _)) -> Error("unexpected yield")
+            Ok(#(YieldCompletion(_, _), _)) -> Error("unexpected yield")
             Error(vm_err) -> Error("vm error: " <> string.inspect(vm_err))
           }
       }
@@ -5859,8 +5863,8 @@ fn run_repl_throw_loop(
             Error(_) -> Error("compile error on last line")
             Ok(template) ->
               case vm.run_and_drain_repl(template, h, b, env) {
-                Ok(#(vm.ThrowCompletion(_, _), _)) -> Ok(Nil)
-                Ok(#(vm.NormalCompletion(val, _), _)) ->
+                Ok(#(ThrowCompletion(_, _), _)) -> Ok(Nil)
+                Ok(#(NormalCompletion(val, _), _)) ->
                   Error("expected throw, got normal: " <> string.inspect(val))
                 _ -> Error("unexpected result")
               }
@@ -6307,7 +6311,7 @@ pub fn strict_reference_error_type_test() -> Nil {
 // ============================================================================
 
 /// Parse + compile + run JS module source via the bundle system.
-fn run_module(source: String) -> Result(vm.Completion, String) {
+fn run_module(source: String) -> Result(Completion, String) {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
@@ -6321,8 +6325,8 @@ fn run_module(source: String) -> Result(vm.Completion, String) {
     Error(err) -> Error("module error: " <> string.inspect(err))
     Ok(bundle) ->
       case module.evaluate_bundle(bundle, h, b, global_object, False) {
-        Ok(#(val, new_heap)) -> Ok(vm.NormalCompletion(val, new_heap))
-        Error(module.EvaluationError(val)) -> Ok(vm.ThrowCompletion(val, h))
+        Ok(#(val, new_heap)) -> Ok(NormalCompletion(val, new_heap))
+        Error(module.EvaluationError(val)) -> Ok(ThrowCompletion(val, h))
         Error(err) -> Error("module error: " <> string.inspect(err))
       }
   }
@@ -6330,18 +6334,18 @@ fn run_module(source: String) -> Result(vm.Completion, String) {
 
 fn assert_module_normal(source: String, expected: value.JsValue) -> Nil {
   case run_module(source) {
-    Ok(vm.NormalCompletion(value, _)) -> {
+    Ok(NormalCompletion(value, _)) -> {
       let assert True = value == expected
       Nil
     }
-    Ok(vm.ThrowCompletion(thrown, heap)) ->
+    Ok(ThrowCompletion(thrown, heap)) ->
       panic as {
         "Expected normal completion but got throw: "
         <> string.inspect(thrown)
         <> " heap="
         <> string.inspect(heap)
       }
-    Ok(vm.YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
+    Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
     Error(err) -> panic as { "run_module failed: " <> err }
   }
 }
@@ -6418,7 +6422,7 @@ pub fn module_repl_harness_globals_test() -> Nil {
     )
   let assert Ok(#(harness_completion, env)) =
     vm.run_and_drain_repl(harness_template, h, b, env)
-  let assert vm.NormalCompletion(_, h) = harness_completion
+  let assert NormalCompletion(_, h) = harness_completion
 
   // Verify greetFromHarness is on globalThis object
   let assert True =

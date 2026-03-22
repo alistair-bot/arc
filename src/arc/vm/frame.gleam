@@ -5,6 +5,7 @@ import arc/vm/opcode.{type Op}
 import arc/vm/value.{type FuncTemplate, type JsValue, type Ref}
 import gleam/dict
 import gleam/option.{type Option}
+import gleam/result
 import gleam/set
 
 /// A single call frame on the VM call stack.
@@ -203,4 +204,72 @@ pub fn range_error(
 ) -> #(State, Result(JsValue, JsValue)) {
   let #(heap, err) = common.make_range_error(state.heap, state.builtins, msg)
   #(State(..state, heap:), Error(err))
+}
+
+// ============================================================================
+// VM error types (shared across vm modules)
+// ============================================================================
+
+/// Internal VM error — these are bugs in the VM, not JS-level errors.
+pub type VmError {
+  /// Tried to read past end of bytecode
+  PcOutOfBounds(pc: Int)
+  /// Stack underflow
+  StackUnderflow(op: String)
+  /// Local variable index out of bounds
+  LocalIndexOutOfBounds(index: Int)
+  /// Unimplemented opcode
+  Unimplemented(op: String)
+}
+
+/// Signals from step() — either continue with new state, or stop.
+pub type StepResult {
+  Done
+  StepVmError(VmError)
+  Thrown
+  /// Generator suspension — yielded a value (or initial suspend).
+  Yielded
+}
+
+// ============================================================================
+// Step-level error helpers
+// ============================================================================
+
+/// Allocate a JS TypeError and return it as a step-level thrown error.
+pub fn throw_type_error(
+  state: State,
+  msg: String,
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  let #(heap, err) = common.make_type_error(state.heap, state.builtins, msg)
+  Error(#(Thrown, err, heap))
+}
+
+/// Allocate a JS RangeError and return it as a step-level thrown error.
+pub fn throw_range_error(
+  state: State,
+  msg: String,
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  let #(heap, err) = common.make_range_error(state.heap, state.builtins, msg)
+  Error(#(Thrown, err, heap))
+}
+
+/// Allocate a JS ReferenceError and return it as a step-level thrown error.
+pub fn throw_reference_error(
+  state: State,
+  msg: String,
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  let #(heap, err) =
+    common.make_reference_error(state.heap, state.builtins, msg)
+  Error(#(Thrown, err, heap))
+}
+
+/// Bridge from inner helpers that return Result(a, #(JsValue, State))
+/// to the step function's Result(a, #(StepResult, JsValue, Heap)).
+pub fn rethrow(
+  res: Result(a, #(JsValue, State)),
+) -> Result(a, #(StepResult, JsValue, Heap)) {
+  result.map_error(res, fn(err) {
+    let #(thrown, state) = err
+    #(Thrown, thrown, state.heap)
+  })
 }

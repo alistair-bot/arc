@@ -11,6 +11,8 @@ import arc/vm/value.{
   GeneratorObject, NativeFunction, ObjectSlot, OrdinaryObject, PidObject,
   PromiseObject,
 }
+import arc/vm/completion.{NormalCompletion, ThrowCompletion, YieldCompletion}
+import arc/vm/frame
 import arc/vm/vm
 import gleam/dict
 import gleam/int
@@ -226,13 +228,13 @@ fn inspect_plain_object(
 
 // -- VM error formatting -----------------------------------------------------
 
-fn inspect_vm_error(vm_err: vm.VmError) -> String {
+fn inspect_vm_error(vm_err: frame.VmError) -> String {
   case vm_err {
-    vm.PcOutOfBounds(pc) -> "PC out of bounds: " <> int.to_string(pc)
-    vm.StackUnderflow(op) -> "stack underflow at " <> op
-    vm.LocalIndexOutOfBounds(idx) ->
+    frame.PcOutOfBounds(pc) -> "PC out of bounds: " <> int.to_string(pc)
+    frame.StackUnderflow(op) -> "stack underflow at " <> op
+    frame.LocalIndexOutOfBounds(idx) ->
       "local index out of bounds: " <> int.to_string(idx)
-    vm.Unimplemented(op) -> "unimplemented: " <> op
+    frame.Unimplemented(op) -> "unimplemented: " <> op
   }
 }
 
@@ -270,15 +272,15 @@ fn eval(
               state.env,
             )
           {
-            Ok(#(vm.NormalCompletion(val, heap), env)) -> #(
+            Ok(#(NormalCompletion(val, heap), env)) -> #(
               ReplState(..state, heap:, env:),
               Ok(val),
             )
-            Ok(#(vm.ThrowCompletion(val, heap), env)) -> #(
+            Ok(#(ThrowCompletion(val, heap), env)) -> #(
               ReplState(..state, heap:, env:),
               Error("Uncaught exception: " <> inspect(heap, val)),
             )
-            Ok(#(vm.YieldCompletion(_, _), _)) ->
+            Ok(#(YieldCompletion(_, _), _)) ->
               panic as "YieldCompletion should not appear at REPL level"
             Error(vm_err) -> #(
               state,
@@ -515,10 +517,10 @@ fn run_script_file(source: String, event_loop: Bool) -> Nil {
           let #(h, b) = builtins.init(h)
           let #(h, global_object) = builtins.globals(b, h)
           case vm.run(template, h, b, global_object, event_loop) {
-            Ok(vm.NormalCompletion(_, _)) -> Nil
-            Ok(vm.ThrowCompletion(val, new_heap)) ->
+            Ok(NormalCompletion(_, _)) -> Nil
+            Ok(ThrowCompletion(val, new_heap)) ->
               io.println("Uncaught exception: " <> inspect(new_heap, val))
-            Ok(vm.YieldCompletion(_, _)) -> Nil
+            Ok(YieldCompletion(_, _)) -> Nil
             Error(vm_err) ->
               io.println("InternalError: " <> inspect_vm_error(vm_err))
           }

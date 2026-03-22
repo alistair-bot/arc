@@ -14,6 +14,10 @@ import arc/vm/value.{
   type FuncTemplate, AccessorProperty, DataProperty, Finite, FuncTemplate,
   JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined,
 }
+import arc/vm/completion.{
+  type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
+}
+import arc/vm/frame
 import arc/vm/vm
 import gleam/option.{None, Some}
 
@@ -60,15 +64,15 @@ fn make_func(
 fn run_simple(
   bytecode: List(Op),
   constants: List(value.JsValue),
-) -> Result(value.JsValue, vm.VmError) {
+) -> Result(value.JsValue, frame.VmError) {
   let func = make_func(bytecode, constants, 0)
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
   case vm.run(func, h, b, global_object, False) {
-    Ok(vm.NormalCompletion(val, _heap)) -> Ok(val)
-    Ok(vm.ThrowCompletion(_, _)) -> panic as "unexpected ThrowCompletion"
-    Ok(vm.YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
+    Ok(NormalCompletion(val, _heap)) -> Ok(val)
+    Ok(ThrowCompletion(_, _)) -> panic as "unexpected ThrowCompletion"
+    Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
     Error(e) -> Error(e)
   }
 }
@@ -77,22 +81,22 @@ fn run_simple(
 fn run_throwing(
   bytecode: List(Op),
   constants: List(value.JsValue),
-) -> Result(value.JsValue, vm.VmError) {
+) -> Result(value.JsValue, frame.VmError) {
   let func = make_func(bytecode, constants, 0)
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
   case vm.run(func, h, b, global_object, False) {
-    Ok(vm.ThrowCompletion(val, _heap)) -> Ok(val)
-    Ok(vm.NormalCompletion(_, _)) ->
+    Ok(ThrowCompletion(val, _heap)) -> Ok(val)
+    Ok(NormalCompletion(_, _)) ->
       panic as "expected ThrowCompletion, got NormalCompletion"
-    Ok(vm.YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
+    Ok(YieldCompletion(_, _)) -> panic as "unexpected YieldCompletion"
     Error(e) -> Error(e)
   }
 }
 
 /// Helper: run func with locals + builtins, return Completion.
-fn run_func(func: FuncTemplate) -> Result(vm.Completion, vm.VmError) {
+fn run_func(func: FuncTemplate) -> Result(Completion, frame.VmError) {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
@@ -448,7 +452,7 @@ pub fn local_store_load_test() {
       [JsNumber(Finite(42.0))],
       1,
     )
-  let assert Ok(vm.NormalCompletion(JsNumber(Finite(42.0)), _)) = run_func(func)
+  let assert Ok(NormalCompletion(JsNumber(Finite(42.0)), _)) = run_func(func)
 }
 
 pub fn var_x_eq_1_plus_2_test() {
@@ -459,7 +463,7 @@ pub fn var_x_eq_1_plus_2_test() {
       [JsNumber(Finite(1.0)), JsNumber(Finite(2.0))],
       1,
     )
-  let assert Ok(vm.NormalCompletion(JsNumber(Finite(3.0)), _)) = run_func(func)
+  let assert Ok(NormalCompletion(JsNumber(Finite(3.0)), _)) = run_func(func)
 }
 
 pub fn multiple_locals_test() {
@@ -481,7 +485,7 @@ pub fn multiple_locals_test() {
       [JsNumber(Finite(10.0)), JsNumber(Finite(20.0))],
       2,
     )
-  let assert Ok(vm.NormalCompletion(JsNumber(Finite(30.0)), _)) = run_func(func)
+  let assert Ok(NormalCompletion(JsNumber(Finite(30.0)), _)) = run_func(func)
 }
 
 // ============================================================================
@@ -599,12 +603,12 @@ pub fn strict_eq_bool_number_false_test() {
 // ============================================================================
 
 pub fn stack_underflow_test() {
-  let assert Error(vm.StackUnderflow("Pop")) = run_simple([Pop], [])
+  let assert Error(frame.StackUnderflow("Pop")) = run_simple([Pop], [])
 }
 
 pub fn local_out_of_bounds_test() {
   let func = make_func([GetLocal(5)], [], 1)
-  let assert Error(vm.LocalIndexOutOfBounds(5)) = run_func(func)
+  let assert Error(frame.LocalIndexOutOfBounds(5)) = run_func(func)
 }
 
 // ============================================================================
@@ -662,7 +666,7 @@ pub fn tdz_throws_reference_error_test() {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
-  let assert Ok(vm.ThrowCompletion(JsObject(ref), heap)) =
+  let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
     vm.run(func, h, b, global_object, False)
   // Check it's a ReferenceError via prototype chain
   let assert Ok(JsString("ReferenceError")) = get_data(heap, ref, "name")
@@ -679,7 +683,7 @@ pub fn type_error_thrown_for_symbol_conversion_test() {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
-  let assert Ok(vm.ThrowCompletion(JsObject(ref), heap)) =
+  let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
     vm.run(func, h, b, global_object, False)
   let assert Ok(JsString("TypeError")) = get_data(heap, ref, "name")
 }
@@ -732,7 +736,7 @@ pub fn get_field_on_null_throws_type_error_test() {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
-  let assert Ok(vm.ThrowCompletion(JsObject(ref), heap)) =
+  let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
     vm.run(func, h, b, global_object, False)
   let assert Ok(JsString("TypeError")) = get_data(heap, ref, "name")
 }
@@ -743,7 +747,7 @@ pub fn get_field_on_undefined_throws_type_error_test() {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
-  let assert Ok(vm.ThrowCompletion(JsObject(ref), heap)) =
+  let assert Ok(ThrowCompletion(JsObject(ref), heap)) =
     vm.run(func, h, b, global_object, False)
   let assert Ok(JsString("TypeError")) = get_data(heap, ref, "name")
 }
@@ -798,7 +802,7 @@ pub fn fibonacci_like_loop_test() {
       [JsNumber(Finite(0.0)), JsNumber(Finite(1.0))],
       2,
     )
-  let assert Ok(vm.NormalCompletion(JsNumber(Finite(2.0)), _)) = run_func(func)
+  let assert Ok(NormalCompletion(JsNumber(Finite(2.0)), _)) = run_func(func)
 }
 
 pub fn simple_loop_with_jump_test() {
@@ -830,7 +834,7 @@ pub fn simple_loop_with_jump_test() {
       [JsNumber(Finite(0.0)), JsNumber(Finite(3.0)), JsNumber(Finite(1.0))],
       1,
     )
-  let assert Ok(vm.NormalCompletion(JsNumber(Finite(3.0)), _)) = run_func(func)
+  let assert Ok(NormalCompletion(JsNumber(Finite(3.0)), _)) = run_func(func)
 }
 
 pub fn try_catch_with_computation_test() {
@@ -879,5 +883,5 @@ pub fn try_catch_with_computation_test() {
       [JsNumber(Finite(1.0)), JsNumber(Finite(2.0)), JsNumber(Finite(10.0))],
       1,
     )
-  let assert Ok(vm.NormalCompletion(JsNumber(Finite(30.0)), _)) = run_func(func)
+  let assert Ok(NormalCompletion(JsNumber(Finite(30.0)), _)) = run_func(func)
 }

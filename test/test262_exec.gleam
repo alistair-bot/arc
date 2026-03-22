@@ -16,6 +16,9 @@ import arc/vm/builtins
 import arc/vm/builtins/common
 import arc/vm/heap.{type Heap}
 import arc/vm/object
+import arc/vm/completion.{
+  type Completion, NormalCompletion, ThrowCompletion, YieldCompletion,
+}
 import arc/vm/value
 import arc/vm/vm
 import gleam/dict
@@ -370,11 +373,11 @@ fn run_runtime_negative_test(
         Error(reason) -> Error(reason)
       }
       case result {
-        Ok(vm.ThrowCompletion(thrown, heap)) ->
+        Ok(ThrowCompletion(thrown, heap)) ->
           verify_negative_type(metadata, thrown, heap)
-        Ok(vm.NormalCompletion(_, _)) ->
+        Ok(NormalCompletion(_, _)) ->
           Fail("expected runtime throw but completed normally")
-        Ok(vm.YieldCompletion(_, _)) -> Fail("unexpected YieldCompletion")
+        Ok(YieldCompletion(_, _)) -> Fail("unexpected YieldCompletion")
         Error(reason) -> Fail("expected runtime throw but got: " <> reason)
       }
     }
@@ -396,11 +399,11 @@ fn run_runtime_negative_test(
           case is_async {
             False ->
               case completion {
-                vm.ThrowCompletion(thrown, heap) ->
+                ThrowCompletion(thrown, heap) ->
                   verify_negative_type(metadata, thrown, heap)
-                vm.NormalCompletion(_, _) ->
+                NormalCompletion(_, _) ->
                   Fail("expected runtime throw but completed normally")
-                vm.YieldCompletion(_, _) -> Fail("unexpected YieldCompletion")
+                YieldCompletion(_, _) -> Fail("unexpected YieldCompletion")
               }
             True ->
               // For async negative tests, $DONE reports via print
@@ -454,10 +457,10 @@ fn run_positive_test(
         Error(_) -> Error("timeout")
       }
       case result {
-        Ok(vm.NormalCompletion(_, _)) -> Pass
-        Ok(vm.ThrowCompletion(thrown, heap)) ->
+        Ok(NormalCompletion(_, _)) -> Pass
+        Ok(ThrowCompletion(thrown, heap)) ->
           Fail("unexpected throw: " <> inspect_thrown(thrown, heap))
-        Ok(vm.YieldCompletion(_, _)) -> Fail("unexpected YieldCompletion")
+        Ok(YieldCompletion(_, _)) -> Fail("unexpected YieldCompletion")
         Error(reason) -> Fail(reason)
       }
     }
@@ -479,10 +482,10 @@ fn run_positive_test(
           case is_async {
             False ->
               case completion {
-                vm.NormalCompletion(_, _) -> Pass
-                vm.ThrowCompletion(thrown, heap) ->
+                NormalCompletion(_, _) -> Pass
+                ThrowCompletion(thrown, heap) ->
                   Fail("unexpected throw: " <> inspect_thrown(thrown, heap))
-                vm.YieldCompletion(_, _) -> Fail("unexpected YieldCompletion")
+                YieldCompletion(_, _) -> Fail("unexpected YieldCompletion")
               }
             True -> check_async_positive(completion, global_ref)
           }
@@ -494,7 +497,7 @@ fn run_positive_test(
 /// Check async test completion for positive tests.
 /// Reads __print_output__ from the global object to determine pass/fail.
 fn check_async_positive(
-  completion: vm.Completion,
+  completion: Completion,
   global_ref: value.Ref,
 ) -> TestOutcome {
   case check_async_completion(completion, global_ref) {
@@ -506,14 +509,14 @@ fn check_async_positive(
 /// Core async completion check. Returns Ok(Nil) for "Test262:AsyncTestComplete",
 /// Error with reason for everything else.
 fn check_async_completion(
-  completion: vm.Completion,
+  completion: Completion,
   global_ref: value.Ref,
 ) -> Result(Nil, String) {
   case completion {
-    vm.ThrowCompletion(thrown, heap) ->
+    ThrowCompletion(thrown, heap) ->
       Error("unexpected throw: " <> inspect_thrown(thrown, heap))
-    vm.YieldCompletion(_, _) -> Error("unexpected YieldCompletion")
-    vm.NormalCompletion(_, heap) -> {
+    YieldCompletion(_, _) -> Error("unexpected YieldCompletion")
+    NormalCompletion(_, heap) -> {
       case get_data(heap, global_ref, "__print_output__") {
         Ok(value.JsString(output)) ->
           case output {
@@ -580,7 +583,7 @@ fn do_run_module(
   metadata: TestMetadata,
   source: String,
   path: String,
-) -> Result(vm.Completion, String) {
+) -> Result(Completion, String) {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
@@ -594,8 +597,8 @@ fn do_run_module(
     Error(err) -> Error("module: " <> string.inspect(err))
     Ok(bundle) ->
       case module.evaluate_bundle(bundle, h, b, global_object, True) {
-        Ok(#(val, new_heap)) -> Ok(vm.NormalCompletion(val, new_heap))
-        Error(module.EvaluationError(val)) -> Ok(vm.ThrowCompletion(val, h))
+        Ok(#(val, new_heap)) -> Ok(NormalCompletion(val, new_heap))
+        Error(module.EvaluationError(val)) -> Ok(ThrowCompletion(val, h))
         Error(err) -> Error("module: " <> string.inspect(err))
       }
   }
@@ -667,7 +670,7 @@ fn do_run_script_with_harness(
   source: String,
   variant: StrictnessVariant,
   is_async: Bool,
-) -> Result(#(vm.Completion, value.Ref), String) {
+) -> Result(#(Completion, value.Ref), String) {
   let h = heap.new()
   let #(h, b) = builtins.init(h)
   let #(h, global_object) = builtins.globals(b, h)
@@ -809,10 +812,10 @@ fn eval_harness_script(
             Error(vm_err) -> Error("harness vm: " <> string.inspect(vm_err))
             Ok(#(completion, new_env)) ->
               case completion {
-                vm.NormalCompletion(_, new_heap) -> Ok(#(new_heap, new_env))
-                vm.ThrowCompletion(thrown, new_heap) ->
+                NormalCompletion(_, new_heap) -> Ok(#(new_heap, new_env))
+                ThrowCompletion(thrown, new_heap) ->
                   Error("harness threw: " <> inspect_thrown(thrown, new_heap))
-                vm.YieldCompletion(_, _) -> Error("harness yielded")
+                YieldCompletion(_, _) -> Error("harness yielded")
               }
           }
       }

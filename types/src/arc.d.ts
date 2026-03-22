@@ -1,11 +1,12 @@
 declare module 'arc:internal' {
-	type Brands = 'Pid';
+	type Brands = 'Pid' | 'Timer';
 }
 
 declare module 'arc' {
 	import type { Brand } from 'arc:internal';
 
 	export interface Pid extends Brand<'Pid'> {}
+	export interface Timer extends Brand<'Timer'> {}
 
 	/**
 	 * Send a message to a process
@@ -51,9 +52,19 @@ declare module 'arc' {
 	 * have passed.
 	 *
 	 * @param cb The callback
-	 * @param ms Minimum amount of milliseconds before executiong
+	 * @param ms Minimum amount of milliseconds before execution
+	 * @returns A timer handle that can be passed to {@link clearTimeout}
 	 */
-	export function setTimeout(cb: () => void, ms: number): void;
+	export function setTimeout(cb: () => void, ms: number): Timer;
+
+	/**
+	 * Cancel a timer created by {@link setTimeout}. If the timer hasn't fired
+	 * yet, the callback will not be invoked. No-op if the timer already fired
+	 * or {@link timer} isn't a timer.
+	 *
+	 * @param timer The timer handle from {@link setTimeout}
+	 */
+	export function clearTimeout(timer: Timer): void;
 
 	/**
 	 * Get the current process id

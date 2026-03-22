@@ -117,6 +117,9 @@ pub type EnvCapture {
 /// An opaque Erlang process identifier. Only created/consumed via FFI.
 pub type ErlangPid
 
+/// Opaque Erlang timer reference (from erlang:send_after).
+pub type ErlangTimerRef
+
 /// A serializable message that can be sent between BEAM processes.
 /// Materializes heap-allocated structures (objects, arrays) into
 /// self-contained values that don't reference any specific VM heap.
@@ -459,6 +462,7 @@ pub type ArcNativeFn {
   ArcReceive
   ArcReceiveAsync
   ArcSetTimeout
+  ArcClearTimeout
   ArcSelf
   ArcLog
   ArcSleep
@@ -772,6 +776,9 @@ pub type ExoticKind {
   /// Erlang PID wrapper for Arc.spawn/self. Contains an opaque BEAM process
   /// identifier that can be used with Arc.send.
   PidObject(pid: ErlangPid)
+  /// Timer handle returned by Arc.setTimeout — wraps the Erlang timer ref
+  /// and the promise data_ref so clearTimeout can cancel cleanly.
+  TimerObject(timer_ref: ErlangTimerRef, data_ref: Ref)
   /// Map object — ES2024 §24.1 Map Objects.
   /// Stores key-value pairs using SameValueZero equality.
   /// The `data` dict maps normalized MapKey → JsValue.
@@ -1247,6 +1254,7 @@ pub fn refs_in_slot(slot: HeapSlot) -> List(Ref) {
         | BooleanObject(_)
         | SymbolObject(_)
         | PidObject(_)
+        | TimerObject(..)
         | RegExpObject(..) -> []
       }
       list.flatten([prop_refs, sym_prop_refs, elem_refs, proto_refs, kind_refs])

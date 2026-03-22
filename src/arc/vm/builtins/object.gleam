@@ -1197,6 +1197,7 @@ fn object_tag(heap: Heap, ref: Ref) -> String {
             value.BooleanObject(_) -> "Boolean"
             value.SymbolObject(_) -> "Symbol"
             value.PidObject(_) -> "Pid"
+            value.TimerObject(..) -> "Timer"
             value.MapObject(..) -> "Map"
             value.SetObject(..) -> "Set"
             value.WeakMapObject(_) -> "WeakMap"

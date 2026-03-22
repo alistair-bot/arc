@@ -2,7 +2,7 @@
 -export([read_line/1]).
 -export([array_get/2, array_set/3, array_repeat/2, array_grow/3]).
 -export([send_message/2, receive_message_infinite/0, receive_message_timeout/1, pid_to_string/1]).
--export([receive_any_event/0, receive_settle_only/0, send_after/3]).
+-export([receive_any_event/0, receive_settle_only/0, send_after/3, cancel_timer/1]).
 -export([receive_user_message/0, receive_user_message_timeout/1]).
 -export([get_script_args/0, sleep/1]).
 
@@ -82,5 +82,12 @@ receive_user_message_timeout(Timeout) ->
     end.
 
 send_after(Ms, Pid, Msg) ->
-    erlang:send_after(Ms, Pid, Msg),
-    nil.
+    erlang:send_after(Ms, Pid, Msg).
+
+%% Returns true if the timer was still active (cancelled successfully),
+%% false if it had already fired.
+cancel_timer(TRef) ->
+    case erlang:cancel_timer(TRef) of
+        false -> false;
+        _TimeLeft -> true
+    end.

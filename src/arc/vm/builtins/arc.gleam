@@ -16,7 +16,7 @@ import arc/vm/value.{
 import gleam/dict
 import gleam/io
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/result
 import gleam/set
 import gleam/string
@@ -43,7 +43,14 @@ pub fn ffi_pid_to_string(pid: value.ErlangPid) -> String
 fn ffi_sleep(ms: Int) -> Nil
 
 @external(erlang, "arc_vm_ffi", "send_after")
-fn ffi_send_after(ms: Int, pid: value.ErlangPid, msg: MailboxEvent) -> Nil
+fn ffi_send_after(
+  ms: Int,
+  pid: value.ErlangPid,
+  msg: MailboxEvent,
+) -> value.ErlangTimerRef
+
+@external(erlang, "arc_vm_ffi", "cancel_timer")
+fn ffi_cancel_timer(tref: value.ErlangTimerRef) -> Bool
 
 // -- Init --------------------------------------------------------------------
 
@@ -56,6 +63,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       #("receive", ArcNative(ArcReceive), 0),
       #("receiveAsync", ArcNative(ArcReceiveAsync), 0),
       #("setTimeout", ArcNative(ArcSetTimeout), 2),
+      #("clearTimeout", ArcNative(value.ArcClearTimeout), 1),
       #("self", ArcNative(ArcSelf), 0),
       #("log", ArcNative(ArcLog), 1),
       #("sleep", ArcNative(ArcSleep), 1),
@@ -100,6 +108,7 @@ pub fn dispatch(
     value.ArcReceive -> receive_(args, state)
     value.ArcReceiveAsync -> receive_async(args, state)
     value.ArcSetTimeout -> set_timeout(args, state)
+    value.ArcClearTimeout -> clear_timeout(args, state)
     value.ArcSelf -> self_(args, state)
     value.ArcLog -> log(args, state)
     value.ArcSleep -> sleep(args, state)
@@ -303,7 +312,11 @@ fn receive_async_inner(
     [JsNumber(value.Finite(n)), ..] -> {
       let ms = value.float_to_int(n)
       case ms >= 0 {
-        True -> ffi_send_after(ms, ffi_self(), value.ReceiverTimeout(data_ref))
+        True -> {
+          let _ =
+            ffi_send_after(ms, ffi_self(), value.ReceiverTimeout(data_ref))
+          Nil
+        }
         False -> Nil
       }
     }
@@ -376,8 +389,60 @@ fn set_timeout_inner(
       JsUndefined,
       JsUndefined,
     )
-  ffi_send_after(ms, ffi_self(), SettlePromise(data_ref, Ok(PmUndefined)))
-  #(State(..state, outstanding: state.outstanding + 1), Ok(JsUndefined))
+  let timer_ref =
+    ffi_send_after(ms, ffi_self(), SettlePromise(data_ref, Ok(PmUndefined)))
+  let #(heap, timer_obj) =
+    heap.alloc(
+      state.heap,
+      ObjectSlot(
+        kind: value.TimerObject(timer_ref:, data_ref:),
+        properties: dict.new(),
+        elements: js_elements.new(),
+        prototype: Some(state.builtins.object.prototype),
+        symbol_properties: dict.new(),
+        extensible: True,
+      ),
+    )
+  #(
+    State(..state, heap:, outstanding: state.outstanding + 1),
+    Ok(JsObject(timer_obj)),
+  )
+}
+
+// -- Arc.clearTimeout --------------------------------------------------------
+
+/// Arc.clearTimeout(timer)
+/// Cancels a timer created by `Arc.setTimeout`. If the timer hasn't fired
+/// yet, the callback will not be invoked and `outstanding` is decremented.
+/// If it already fired (or `timer` isn't a timer), this is a no-op.
+pub fn clear_timeout(
+  args: List(JsValue),
+  state: State,
+) -> #(State, Result(JsValue, JsValue)) {
+  let cancelled =
+    args
+    |> list.first
+    |> option.from_result
+    |> option.then(as_timer_ref(state.heap, _))
+    |> option.map(ffi_cancel_timer)
+    |> option.unwrap(False)
+  let state = case cancelled {
+    True -> State(..state, outstanding: state.outstanding - 1)
+    False -> state
+  }
+  #(state, Ok(JsUndefined))
+}
+
+fn as_timer_ref(h: Heap, val: JsValue) -> Option(value.ErlangTimerRef) {
+  case val {
+    JsObject(ref) ->
+      case heap.read(h, ref) {
+        Some(ObjectSlot(kind: value.TimerObject(timer_ref:, ..), ..)) ->
+          Some(timer_ref)
+        _ -> None
+      }
+    _ -> None
+  }
 }
 
 // -- Arc.self ----------------------------------------------------------------

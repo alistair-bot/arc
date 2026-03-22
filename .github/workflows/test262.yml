@@ -34,9 +34,9 @@ jobs:
       - uses: erlef/setup-beam@v1
         if: steps.changes.outputs.changed == 'true'
         with:
-          otp-version: "28"
-          gleam-version: "1.15"
-          rebar3-version: "3"
+          otp-version: '28'
+          gleam-version: '1.15'
+          rebar3-version: '3'
 
       - name: Setup Python
         if: steps.changes.outputs.changed == 'true'
@@ -78,7 +78,7 @@ jobs:
           with open('.github/test262/results.json') as f:
               r = json.load(f)
           print(f\"{r['percent']}% ({r['pass']}/{r['tested']})\")
-          ")" -m "Co-authored-by: Alistair Smith <hi@alistair.sh>"
+          ")"
             git pull --rebase origin master
             git push
           fi

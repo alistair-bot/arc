@@ -16,7 +16,12 @@ Run the full test262 execution conformance suite and regenerate the conformance 
    TEST262_EXEC=1 RESULTS_FILE=.github/test262/results.json gleam test
    ```
 
-   This runs all ~52K test262 tests through the full parse → compile → execute pipeline. Currently takes ~5-10 minutes since most tests fail fast at compile time. Will take longer as more features are implemented.
+   This runs all ~53K test262 tests through the full parse → compile → execute pipeline. Takes ~80 seconds locally, ~10 minutes on CI.
+
+   Other useful env vars:
+   - `TEST262_FILTER=path/substring` — run only tests whose path contains the substring (e.g. `TEST262_FILTER=Array/prototype/map`)
+   - `FAIL_LOG=/tmp/fails.tsv` — write per-test failure reasons (tab-separated path + reason) for bucketing with `cut -f2 | sort | uniq -c | sort -rn`
+   - `UPDATE_SNAPSHOT=1` — update the pass/fail snapshot file
 
 2. **Read the results** from `.github/test262/results.json` and report the pass/fail/skip numbers to the user.
 

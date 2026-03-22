@@ -132,7 +132,7 @@ pub type PortableMessage {
   PmBigInt(BigInt)
   PmArray(List(PortableMessage))
   PmObject(
-    properties: List(#(String, PortableMessage)),
+    properties: List(#(PropertyKey, PortableMessage)),
     symbol_properties: List(#(SymbolId, PortableMessage)),
   )
   PmPid(ErlangPid)
@@ -805,6 +805,41 @@ pub type ExoticKind {
   RegExpObject(pattern: String, flags: String)
 }
 
+/// Canonical property key. Per spec, property keys are String | Symbol, but
+/// we distinguish array-index strings (canonical numeric strings in [0, 2^32-1))
+/// at the type level so `arr[5]` never round-trips through string conversion.
+/// Symbols are stored separately in `symbol_properties` so they're not here.
+pub type PropertyKey {
+  /// Canonical array index — a non-negative integer whose ToString form equals
+  /// the original key. `"5"` → `Index(5)`, but `"05"` stays `Named("05")`.
+  Index(Int)
+  /// Any other string key.
+  Named(String)
+}
+
+/// Canonicalize a string key. Implements CanonicalNumericIndexString (§7.1.21)
+/// combined with the array-index range check: if `s` parses to a non-negative
+/// int and `int.to_string(n) == s`, it's `Index(n)`; otherwise `Named(s)`.
+pub fn canonical_key(s: String) -> PropertyKey {
+  case int.parse(s) {
+    Ok(n) if n >= 0 ->
+      case int.to_string(n) == s {
+        True -> Index(n)
+        False -> Named(s)
+      }
+    _ -> Named(s)
+  }
+}
+
+/// Render a PropertyKey back to its spec string form (for error messages,
+/// for-in enumeration, etc.).
+pub fn key_to_string(key: PropertyKey) -> String {
+  case key {
+    Index(n) -> int.to_string(n)
+    Named(s) -> s
+  }
+}
+
 /// Property descriptor — writable/enumerable/configurable flags per property.
 /// Following QuickJS: bit-flags on every property. No accessor properties yet.
 pub type Property {
@@ -951,7 +986,7 @@ pub type HeapSlot {
   /// Unified object slot — covers ordinary objects, arrays, and functions.
   ObjectSlot(
     kind: ExoticKind,
-    properties: Dict(String, Property),
+    properties: Dict(PropertyKey, Property),
     elements: JsElements,
     prototype: Option(Ref),
     symbol_properties: Dict(SymbolId, Property),
@@ -1063,7 +1098,7 @@ pub fn heap_slot_to_string(slot: HeapSlot) -> String {
               <> dict.fold(properties, [], fn(acc, key, property) {
               [
                 [
-                  key <> ":",
+                  key_to_string(key) <> ":",
                   case property {
                     DataProperty(value:, writable:, enumerable:, configurable:) -> [
                       [],

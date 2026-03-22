@@ -103,7 +103,12 @@ fn try_to_primitive_methods(
   case method_names {
     [] -> thrown_type_error(state, "Cannot convert object to primitive value")
     [name, ..rest] -> {
-      use #(method, state) <- result.try(object.get_value(state, ref, name, val))
+      use #(method, state) <- result.try(object.get_value(
+        state,
+        ref,
+        value.Named(name),
+        val,
+      ))
       case is_callable_value(state.heap, method) {
         True -> {
           use #(result, new_state) <- result.try(
@@ -165,7 +170,7 @@ pub fn js_instanceof(
           use #(proto_val, state) <- result.try(object.get_value(
             state,
             ctor_ref,
-            "prototype",
+            value.Named("prototype"),
             constructor,
           ))
           case proto_val {

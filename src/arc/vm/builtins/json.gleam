@@ -31,7 +31,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       #("stringify", JsonNative(JsonStringify), 1),
     ])
 
-  let properties = dict.from_list(methods)
+  let properties = common.named_props(methods)
   let symbol_properties =
     dict.from_list([
       #(
@@ -470,14 +470,14 @@ fn materialize_object_entries(
   h: Heap,
   b: common.Builtins,
   entries: List(#(String, JsonValue)),
-  acc: List(#(String, Property)),
-) -> #(Heap, List(#(String, Property))) {
+  acc: List(#(value.PropertyKey, Property)),
+) -> #(Heap, List(#(value.PropertyKey, Property))) {
   case entries {
     [] -> #(h, list.reverse(acc))
     [#(key, val), ..rest] -> {
       let #(h, js_val) = materialize(h, b, val)
       materialize_object_entries(h, b, rest, [
-        #(key, value.data_property(js_val)),
+        #(value.canonical_key(key), value.data_property(js_val)),
         ..acc
       ])
     }
@@ -645,7 +645,7 @@ fn stringify_array(
 /// Stringify a JSON object.
 fn stringify_object(
   h: Heap,
-  entries: List(#(String, Property)),
+  entries: List(#(value.PropertyKey, Property)),
   seen: Set(Int),
   acc: List(String),
 ) -> Result(Option(String), String) {
@@ -654,7 +654,7 @@ fn stringify_object(
     [#(key, DataProperty(value: val, enumerable: True, ..)), ..rest] -> {
       case stringify_value(h, val, seen) {
         Ok(Some(s)) -> {
-          let entry = stringify_string(key) <> ":" <> s
+          let entry = stringify_string(value.key_to_string(key)) <> ":" <> s
           stringify_object(h, rest, seen, [entry, ..acc])
         }
         Ok(None) ->

@@ -201,7 +201,7 @@ pub fn drain_generator_to_array(
     [JsObject(result_ref), ..] ->
       case heap.read(next_state.heap, result_ref) {
         Some(ObjectSlot(properties: props, ..)) -> {
-          let done = case dict.get(props, "done") {
+          let done = case dict.get(props, value.Named("done")) {
             Ok(DataProperty(value: JsBool(d), ..)) -> d
             _ -> False
           }
@@ -216,7 +216,7 @@ pub fn drain_generator_to_array(
                 ),
               )
             False -> {
-              let val = case dict.get(props, "value") {
+              let val = case dict.get(props, value.Named("value")) {
                 Ok(DataProperty(value: v, ..)) -> v
                 _ -> JsUndefined
               }

@@ -35,7 +35,8 @@ import arc/vm/state.{
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, AsyncFunctionSlot, DataProperty,
   FunctionObject, GeneratorObject, GeneratorSlot, JsNull, JsObject, JsString,
-  JsUndefined, JsUninitialized, NativeFunction, ObjectSlot, OrdinaryObject,
+  JsUndefined, JsUninitialized, Named, NativeFunction, ObjectSlot,
+  OrdinaryObject,
 }
 import gleam/bool
 import gleam/dict
@@ -746,7 +747,7 @@ pub fn call_native(
           // Get the target's name for "bound <name>"
           let name = case heap.read(state.heap, target_ref) {
             Some(ObjectSlot(properties:, ..)) ->
-              case dict.get(properties, "name") {
+              case dict.get(properties, Named("name")) {
                 Ok(DataProperty(value: JsString(n), ..)) -> "bound " <> n
                 _ -> "bound "
               }
@@ -764,7 +765,7 @@ pub fn call_native(
                   )),
                 ),
                 properties: dict.from_list([
-                  #("name", common.fn_name_property(name)),
+                  #(Named("name"), common.fn_name_property(name)),
                 ]),
                 elements: elements.new(),
                 prototype: Some(state.builtins.function.prototype),
@@ -1139,7 +1140,7 @@ pub fn do_construct(
           )
         False -> {
           // Base constructor: allocate the new object
-          let proto = case dict.get(properties, "prototype") {
+          let proto = case dict.get(properties, Named("prototype")) {
             Ok(DataProperty(value: JsObject(proto_ref), ..)) -> Some(proto_ref)
             _ -> Some(state.builtins.object.prototype)
           }
@@ -1229,7 +1230,7 @@ pub fn construct_value(
       properties:,
       ..,
     )) -> {
-      let proto = case dict.get(properties, "prototype") {
+      let proto = case dict.get(properties, Named("prototype")) {
         Ok(DataProperty(value: JsObject(proto_ref), ..)) -> Some(proto_ref)
         _ -> Some(state.builtins.object.prototype)
       }
@@ -1396,7 +1397,7 @@ pub fn function_to_string(
         }
         Some(ObjectSlot(kind: NativeFunction(_), properties:, ..)) -> {
           let name =
-            dict.get(properties, "name")
+            dict.get(properties, Named("name"))
             |> result.map(fn(p) {
               case p {
                 DataProperty(value: JsString(n), ..) -> n

@@ -170,8 +170,10 @@ fn inspect_array(
   }
 }
 
-fn inspect_function(properties: dict.Dict(String, value.Property)) -> String {
-  let name = case dict.get(properties, "name") {
+fn inspect_function(
+  properties: dict.Dict(value.PropertyKey, value.Property),
+) -> String {
+  let name = case dict.get(properties, value.Named("name")) {
     Ok(DataProperty(value: value.JsString(n), ..)) -> n
     _ -> ""
   }
@@ -184,7 +186,7 @@ fn inspect_function(properties: dict.Dict(String, value.Property)) -> String {
 /// Inspect an object, checking for Symbol.toStringTag to add a tag prefix.
 fn inspect_tagged_object(
   h: Heap,
-  properties: dict.Dict(String, value.Property),
+  properties: dict.Dict(value.PropertyKey, value.Property),
   symbol_properties: dict.Dict(value.SymbolId, value.Property),
   depth: Int,
   seen: set.Set(Int),
@@ -199,7 +201,7 @@ fn inspect_tagged_object(
 
 fn inspect_plain_object(
   h: Heap,
-  properties: dict.Dict(String, value.Property),
+  properties: dict.Dict(value.PropertyKey, value.Property),
   depth: Int,
   seen: set.Set(Int),
 ) -> String {
@@ -212,7 +214,11 @@ fn inspect_plain_object(
           let #(key, prop) = pair
           case prop {
             DataProperty(value: v, ..) ->
-              Ok(key <> ": " <> inspect_inner(h, v, depth + 1, seen))
+              Ok(
+                value.key_to_string(key)
+                <> ": "
+                <> inspect_inner(h, v, depth + 1, seen),
+              )
             _ -> Error(Nil)
           }
         })

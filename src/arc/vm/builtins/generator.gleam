@@ -40,7 +40,7 @@ pub fn init(
       h,
       ObjectSlot(
         kind: value.OrdinaryObject,
-        properties: dict.from_list(methods),
+        properties: common.named_props(methods),
         symbol_properties:,
         elements: elements.new(),
         prototype: Some(iterator_proto),

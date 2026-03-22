@@ -5,7 +5,7 @@ import arc/vm/internal/elements
 import arc/vm/ops/object
 import arc/vm/state
 import arc/vm/value.{
-  type Job, type JsValue, type Ref, BoxSlot, Call, JsBool, JsObject,
+  type Job, type JsValue, type Ref, BoxSlot, Call, JsBool, JsObject, Named,
   NativeFunction, ObjectSlot, PromiseCatch, PromiseConstructor, PromiseFinally,
   PromiseObject, PromiseReaction, PromiseRejectFunction, PromiseRejectStatic,
   PromiseResolveFunction, PromiseResolveStatic, PromiseSlot, PromiseThen,
@@ -162,7 +162,7 @@ pub fn create_resolving_functions(
             already_resolved_ref:,
           )),
         ),
-        properties: dict.from_list([
+        properties: common.named_props([
           #("name", common.fn_name_property("")),
           #("length", common.fn_length_property(1)),
         ]),
@@ -185,7 +185,7 @@ pub fn create_resolving_functions(
             already_resolved_ref:,
           )),
         ),
-        properties: dict.from_list([
+        properties: common.named_props([
           #("name", common.fn_name_property("")),
           #("length", common.fn_length_property(1)),
         ]),
@@ -521,7 +521,7 @@ pub fn get_thenable_then(
     // Step 8: If resolution is not an Object -> Error(None) (caller fulfills)
     JsObject(ref) ->
       // Step 9: Let then be Completion(Get(resolution, "then"))
-      case object.get_value(state, ref, "then", val) {
+      case object.get_value(state, ref, Named("then"), val) {
         Ok(#(then_val, state)) ->
           // Step 12: If IsCallable(thenAction) is false -> Error(None)
           case helpers.is_callable(state.heap, then_val) {

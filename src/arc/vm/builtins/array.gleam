@@ -19,8 +19,8 @@ import arc/vm/value.{
   ArrayPrototypeSlice, ArrayPrototypeSome, ArrayPrototypeSort,
   ArrayPrototypeSplice, ArrayPrototypeToReversed, ArrayPrototypeToSorted,
   ArrayPrototypeToSpliced, ArrayPrototypeUnshift, ArrayPrototypeWith,
-  DataProperty, Dispatch, Finite, JsBool, JsNull, JsNumber, JsObject, JsString,
-  JsUndefined, ObjectSlot,
+  DataProperty, Dispatch, Finite, Index, JsBool, JsNull, JsNumber, JsObject,
+  JsString, JsUndefined, Named, ObjectSlot,
 }
 import gleam/bool
 import gleam/dict
@@ -508,7 +508,7 @@ fn get_index(
   this: JsValue,
   idx: Int,
 ) -> Result(#(JsValue, State), #(JsValue, State)) {
-  object.get_value_of(state, this, int.to_string(idx))
+  object.get_value_of(state, this, Index(idx))
 }
 
 /// HasProperty (ES2024 §7.3.11) on an array-like by integer index.
@@ -519,7 +519,7 @@ fn get_index(
 /// For other primitives: false (wrapper object has no indexed own properties).
 fn has_index(heap: Heap, this: JsValue, idx: Int) -> Bool {
   case this {
-    JsObject(ref) -> object.has_property(heap, ref, int.to_string(idx))
+    JsObject(ref) -> object.has_property(heap, ref, Index(idx))
     JsString(s) -> idx >= 0 && idx < string.length(s)
     _ -> False
   }
@@ -541,14 +541,14 @@ fn has_index(heap: Heap, this: JsValue, idx: Int) -> Bool {
 fn to_length_from_properties(
   state: State,
   ref: value.Ref,
-  properties: dict.Dict(String, Property),
+  properties: dict.Dict(value.PropertyKey, Property),
 ) -> Int {
   // Fast path: own data property
-  case dict.get(properties, "length") {
+  case dict.get(properties, Named("length")) {
     Ok(DataProperty(value: len_val, ..)) -> to_length(len_val)
     // Accessor or missing: use full [[Get]] which handles getters + prototype chain
     _ ->
-      case object.get_value(state, ref, "length", JsObject(ref)) {
+      case object.get_value(state, ref, Named("length"), JsObject(ref)) {
         Ok(#(len_val, _state)) -> to_length(len_val)
         Error(_) -> 0
       }
@@ -669,7 +669,7 @@ fn generic_set(
     use #(state, success) <- result.try(object.set_value(
       state,
       ref,
-      key,
+      value.canonical_key(key),
       val,
       JsObject(ref),
     ))
@@ -743,7 +743,8 @@ fn generic_delete(
   key: String,
 ) -> Result(State, #(JsValue, State)) {
   // §7.3.9 step 1: Let success be ? O.[[Delete]](P).
-  let #(h, ok) = object.delete_property(state.heap, ref, key)
+  let #(h, ok) =
+    object.delete_property(state.heap, ref, value.canonical_key(key))
   let state = State(..state, heap: h)
   case ok {
     // success = true → return normally.
@@ -778,7 +779,7 @@ fn generic_delete(
 ///   "Let kPresent be ? HasProperty(O, Pk)."
 fn generic_has(heap: Heap, ref: Ref, idx: Int) -> Bool {
   // §7.3.11 step 1: O.[[HasProperty]](! ToString(𝔽(idx)))
-  object.has_property(heap, ref, int.to_string(idx))
+  object.has_property(heap, ref, Index(idx))
 }
 
 /// Get (ES2024 §7.3.2).
@@ -799,7 +800,7 @@ fn generic_get(
   idx: Int,
 ) -> Result(#(JsValue, State), #(JsValue, State)) {
   // §7.3.2 step 1: O.[[Get]](! ToString(𝔽(idx)), O)
-  object.get_value(state, ref, int.to_string(idx), JsObject(ref))
+  object.get_value(state, ref, Index(idx), JsObject(ref))
 }
 
 // ============================================================================
@@ -3701,7 +3702,7 @@ fn array_from_array_like(
       )
     _ -> {
       // LengthOfArrayLike: read "length" via get_value_of, then ToLength.
-      let length = case object.get_value_of(state, items, "length") {
+      let length = case object.get_value_of(state, items, Named("length")) {
         Ok(#(len_val, _state)) -> to_length(len_val)
         Error(_) -> 0
       }

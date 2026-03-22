@@ -751,7 +751,7 @@ fn eval_harness(
         object.set_property(
           h,
           global_object,
-          "$262",
+          value.Named("$262"),
           value.JsObject(dollar_262_ref),
         )
 
@@ -825,7 +825,7 @@ fn eval_harness_script(
 }
 
 fn get_data(h: Heap, ref: value.Ref, key: String) -> Result(value.JsValue, Nil) {
-  case object.get_own_property(h, ref, key) {
+  case object.get_own_property(h, ref, value.Named(key)) {
     Some(value.DataProperty(value: val, ..)) -> Ok(val)
     Some(_) -> Error(Nil)
     None ->

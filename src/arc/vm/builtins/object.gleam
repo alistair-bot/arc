@@ -6,17 +6,18 @@ import arc/vm/ops/object
 import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsElements, type JsValue, type ObjectNativeFn, type Ref, AccessorProperty,
-  ArrayObject, DataProperty, Dispatch, FunctionObject, GeneratorObject, JsBool,
-  JsNull, JsNumber, JsObject, JsString, JsSymbol, JsUndefined, NativeFunction,
-  ObjectAssign, ObjectConstructor, ObjectCreate, ObjectDefineProperties,
-  ObjectDefineProperty, ObjectEntries, ObjectFreeze, ObjectFromEntries,
-  ObjectGetOwnPropertyDescriptor, ObjectGetOwnPropertyDescriptors,
-  ObjectGetOwnPropertyNames, ObjectGetOwnPropertySymbols, ObjectGetPrototypeOf,
-  ObjectHasOwn, ObjectIs, ObjectIsExtensible, ObjectIsFrozen, ObjectIsSealed,
-  ObjectKeys, ObjectNative, ObjectPreventExtensions,
-  ObjectPrototypeHasOwnProperty, ObjectPrototypePropertyIsEnumerable,
-  ObjectPrototypeToString, ObjectPrototypeValueOf, ObjectSeal,
-  ObjectSetPrototypeOf, ObjectSlot, ObjectValues, OrdinaryObject, PromiseObject,
+  ArrayObject, DataProperty, Dispatch, FunctionObject, GeneratorObject, Index,
+  JsBool, JsNull, JsNumber, JsObject, JsString, JsSymbol, JsUndefined, Named,
+  NativeFunction, ObjectAssign, ObjectConstructor, ObjectCreate,
+  ObjectDefineProperties, ObjectDefineProperty, ObjectEntries, ObjectFreeze,
+  ObjectFromEntries, ObjectGetOwnPropertyDescriptor,
+  ObjectGetOwnPropertyDescriptors, ObjectGetOwnPropertyNames,
+  ObjectGetOwnPropertySymbols, ObjectGetPrototypeOf, ObjectHasOwn, ObjectIs,
+  ObjectIsExtensible, ObjectIsFrozen, ObjectIsSealed, ObjectKeys, ObjectNative,
+  ObjectPreventExtensions, ObjectPrototypeHasOwnProperty,
+  ObjectPrototypePropertyIsEnumerable, ObjectPrototypeToString,
+  ObjectPrototypeValueOf, ObjectSeal, ObjectSetPrototypeOf, ObjectSlot,
+  ObjectValues, OrdinaryObject, PromiseObject,
 }
 import gleam/dict
 import gleam/int
@@ -38,7 +39,7 @@ fn try_get(
   receiver: JsValue,
   cont: fn(JsValue, State) -> #(State, Result(JsValue, JsValue)),
 ) -> #(State, Result(JsValue, JsValue)) {
-  case object.get_value(state, ref, key, receiver) {
+  case object.get_value(state, ref, value.canonical_key(key), receiver) {
     Ok(#(val, state)) -> cont(val, state)
     Error(#(thrown, state)) -> #(state, Error(thrown))
   }
@@ -223,7 +224,9 @@ fn get_own_property_descriptor(
       // (We use ToString here; spec uses ToPropertyKey which also handles Symbols.)
       use key_str, state <- state.try_to_string(state, key_val)
       // Step 3: Let desc be ? obj.[[GetOwnProperty]](key).
-      case object.get_own_property(state.heap, ref, key_str) {
+      case
+        object.get_own_property(state.heap, ref, value.canonical_key(key_str))
+      {
         Some(prop) -> {
           // Step 4: Return FromPropertyDescriptor(desc).
           // (desc is not undefined, so we build a descriptor object.)
@@ -309,7 +312,7 @@ fn make_descriptor_object(
         heap,
         ObjectSlot(
           kind: OrdinaryObject,
-          properties: dict.from_list([
+          properties: common.named_props([
             // Step 3a: "value"
             #("value", value.data_property(val)),
             // Step 3b: "writable"
@@ -335,7 +338,7 @@ fn make_descriptor_object(
         heap,
         ObjectSlot(
           kind: OrdinaryObject,
-          properties: dict.from_list([
+          properties: common.named_props([
             // Step 4a: "get"
             #("get", value.data_property(get_val)),
             // Step 4b: "set"
@@ -511,7 +514,8 @@ fn apply_descriptor(
       prototype:,
       extensible:,
     )) -> {
-      let existing = dict.get(properties, key)
+      let pkey = value.canonical_key(key)
+      let existing = dict.get(properties, pkey)
 
       // §10.1.6.3 step 2: If property doesn't exist and object is not extensible, reject.
       use Nil <- result.try(case existing, extensible {
@@ -724,7 +728,7 @@ fn apply_descriptor(
       }
 
       // Write the new/updated property to the object.
-      let new_props = dict.insert(properties, key, new_prop)
+      let new_props = dict.insert(properties, pkey, new_prop)
       let h =
         heap.write(
           state.heap,
@@ -763,14 +767,14 @@ fn read_desc_field(
   desc: JsValue,
   key: String,
 ) -> Result(#(option.Option(JsValue), State), #(JsValue, State)) {
-  use #(val, state) <- result.try(object.get_value_of(state, desc, key))
+  use #(val, state) <- result.try(object.get_value_of(state, desc, Named(key)))
   case val {
     JsUndefined ->
       // get_value_of returns undefined for both "absent" and "present with value
       // undefined". We need HasProperty semantics (proto chain walk) to distinguish.
       case desc {
         JsObject(ref) ->
-          case has_property(state.heap, ref, key) {
+          case has_property(state.heap, ref, Named(key)) {
             True -> Ok(#(Some(JsUndefined), state))
             False -> Ok(#(option.None, state))
           }
@@ -930,10 +934,11 @@ fn collect_own_keys(heap: Heap, ref: Ref, enumerable_only: Bool) -> List(String)
             True ->
               case prop {
                 // §7.3.23 step 3.a.ii: only include if [[Enumerable]] is true
-                DataProperty(enumerable: True, ..) -> Ok(key)
+                DataProperty(enumerable: True, ..) ->
+                  Ok(value.key_to_string(key))
                 _ -> Error(Nil)
               }
-            False -> Ok(key)
+            False -> Ok(value.key_to_string(key))
           }
         })
       // Array exotic: "length" is a non-enumerable own property (§10.4.2)
@@ -982,7 +987,7 @@ fn collect_index_keys(
 
 /// [[HasProperty]] — §7.3.11. Walks the prototype chain looking for a string key.
 /// Returns True if found as own property at any level, False if not found.
-fn has_property(heap: Heap, ref: Ref, key: String) -> Bool {
+fn has_property(heap: Heap, ref: Ref, key: value.PropertyKey) -> Bool {
   case heap.read(heap, ref) {
     Some(ObjectSlot(properties:, prototype:, ..)) ->
       case dict.has_key(properties, key) {
@@ -1038,7 +1043,9 @@ fn has_own_property(
     // Step 2: Let O be ? ToObject(this value).
     // Step 3: Return ? HasOwnProperty(O, P).
     JsObject(ref) -> {
-      let result = case object.get_own_property(state.heap, ref, key_str) {
+      let result = case
+        object.get_own_property(state.heap, ref, value.canonical_key(key_str))
+      {
         Some(_) -> JsBool(True)
         None -> JsBool(False)
       }
@@ -1091,7 +1098,9 @@ fn property_is_enumerable(
       // Step 3: Let desc be ? O.[[GetOwnProperty]](P).
       // Steps 4-5: If desc is undefined return false, else return
       //   desc.[[Enumerable]].
-      let result = case object.get_own_property(state.heap, ref, key_str) {
+      let result = case
+        object.get_own_property(state.heap, ref, value.canonical_key(key_str))
+      {
         Some(DataProperty(enumerable: e, ..))
         | Some(AccessorProperty(enumerable: e, ..)) -> JsBool(e)
         _ -> JsBool(False)
@@ -1383,7 +1392,12 @@ fn collect_values(
     [] -> Ok(#(acc, state))
     [k, ..rest] -> {
       // §7.3.23 step 3.a.ii.1: Let value be ? Get(O, key)
-      use #(val, state) <- result.try(object.get_value(state, ref, k, receiver))
+      use #(val, state) <- result.try(object.get_value(
+        state,
+        ref,
+        value.canonical_key(k),
+        receiver,
+      ))
       collect_values(state, ref, receiver, rest, [val, ..acc])
     }
   }
@@ -1456,7 +1470,12 @@ fn collect_entries(
     [] -> Ok(#(acc, state))
     [k, ..rest] -> {
       // §7.3.23 step 3.a.ii.1: Let value be ? Get(O, key)
-      use #(val, state) <- result.try(object.get_value(state, ref, k, receiver))
+      use #(val, state) <- result.try(object.get_value(
+        state,
+        ref,
+        value.canonical_key(k),
+        receiver,
+      ))
       collect_entries(state, ref, receiver, rest, [#(k, val), ..acc])
     }
   }
@@ -1592,7 +1611,9 @@ fn define_props_loop(
     // Step 6: Return O (all keys processed).
     [] -> #(state, Ok(JsObject(target_ref)))
     [key, ..rest] ->
-      case object.get_own_property(state.heap, props_ref, key) {
+      case
+        object.get_own_property(state.heap, props_ref, value.canonical_key(key))
+      {
         // Steps 4.b.i + 4.b.ii: descObj is an Object → ToPropertyDescriptor.
         Some(DataProperty(value: JsObject(desc_ref), ..)) -> {
           // Step 5.a: DefinePropertyOrThrow(O, key, desc).
@@ -1739,12 +1760,7 @@ fn assign_string_chars(
     [] -> Ok(state)
     [ch, ..rest] -> {
       let #(heap, _ok) =
-        object.set_property(
-          state.heap,
-          target_ref,
-          int.to_string(idx),
-          JsString(ch),
-        )
+        object.set_property(state.heap, target_ref, Index(idx), JsString(ch))
       assign_string_chars(State(..state, heap:), target_ref, rest, idx + 1)
     }
   }
@@ -1765,18 +1781,19 @@ fn assign_keys(
   case keys {
     [] -> Ok(state)
     [k, ..rest] -> {
+      let pk = value.canonical_key(k)
       // Step 2.a: Let propValue be ? Get(from, nextKey).
       use #(val, state) <- result.try(object.get_value(
         state,
         src_ref,
-        k,
+        pk,
         receiver,
       ))
       // Step 2.b: Perform ? Set(to, nextKey, propValue, true).
       use #(state, _) <- result.try(object.set_value(
         state,
         target_ref,
-        k,
+        pk,
         val,
         JsObject(target_ref),
       ))
@@ -1901,7 +1918,9 @@ fn has_own(
       // Step 2: Let key be ? ToPropertyKey(P).
       use key_str, state <- state.try_to_string(state, key_val)
       // Step 3: Return ? HasOwnProperty(obj, key).
-      let result = case object.get_own_property(state.heap, ref, key_str) {
+      let result = case
+        object.get_own_property(state.heap, ref, value.canonical_key(key_str))
+      {
         Some(_) -> JsBool(True)
         None -> JsBool(False)
       }
@@ -2438,7 +2457,7 @@ fn from_entries_loop(
       // we reverse (to restore insertion order) then fold left-to-right.
       let props =
         list.fold(list.reverse(str_acc), dict.new(), fn(d, pair) {
-          dict.insert(d, pair.0, pair.1)
+          dict.insert(d, value.canonical_key(pair.0), pair.1)
         })
       let #(heap, obj_ref) =
         heap.alloc(
@@ -2686,7 +2705,13 @@ fn group_by_loop(
               list.reverse(values),
               state.builtins.array.prototype,
             )
-          #(h, [#(key, value.builtin_property(JsObject(arr_ref))), ..ps])
+          #(h, [
+            #(
+              value.canonical_key(key),
+              value.builtin_property(JsObject(arr_ref)),
+            ),
+            ..ps
+          ])
         })
       let #(heap, obj_ref) =
         heap.alloc(

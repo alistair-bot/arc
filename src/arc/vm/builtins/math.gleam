@@ -72,7 +72,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       #("atanh", MathNative(MathAtanh), 1),
     ])
 
-  let properties = dict.from_list(list.append(methods, constants))
+  let properties = common.named_props(list.append(methods, constants))
   let symbol_properties =
     dict.from_list([
       #(

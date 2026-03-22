@@ -2,8 +2,9 @@ import arc/vm/heap.{type Heap}
 import arc/vm/internal/elements
 import arc/vm/value.{
   type CallNativeFn, type ExoticKind, type JsValue, type NativeFn,
-  type NativeFnSlot, type Property, type Ref, ArrayObject, Call, Dispatch,
-  JsObject, JsString, NativeFunction, ObjectSlot, OrdinaryObject,
+  type NativeFnSlot, type Property, type PropertyKey, type Ref, ArrayObject,
+  Call, Dispatch, JsObject, JsString, Named, NativeFunction, ObjectSlot,
+  OrdinaryObject,
 }
 import gleam/dict.{type Dict}
 import gleam/int
@@ -73,7 +74,7 @@ pub type Builtins {
 pub fn alloc_proto(
   h: Heap,
   prototype: Option(Ref),
-  properties: Dict(String, Property),
+  properties: Dict(PropertyKey, Property),
 ) -> #(Heap, Ref) {
   let #(h, ref) =
     heap.alloc(
@@ -100,13 +101,22 @@ pub fn alloc_pojo(
     heap,
     ObjectSlot(
       kind: OrdinaryObject,
-      properties: dict.from_list(props),
+      properties: named_props(props),
       symbol_properties: dict.new(),
       elements: elements.new(),
       prototype: Some(object_proto),
       extensible: True,
     ),
   )
+}
+
+/// Build a PropertyKey-keyed dict from String-keyed entries. Builtin init code
+/// only ever uses named keys (never indices), so this wraps each key in Named.
+pub fn named_props(
+  props: List(#(String, Property)),
+) -> Dict(PropertyKey, Property) {
+  use acc, #(k, v) <- list.fold(props, dict.new())
+  dict.insert(acc, Named(k), v)
 }
 
 /// Allocate a NativeFunction ObjectSlot with standard name/length properties.
@@ -137,7 +147,7 @@ fn alloc_native_fn_slot(
       h,
       ObjectSlot(
         kind: NativeFunction(slot),
-        properties: dict.from_list([
+        properties: named_props([
           #("name", fn_name_property(name)),
           #("length", fn_length_property(arity)),
         ]),
@@ -294,7 +304,7 @@ pub fn init_type(
       h,
       ObjectSlot(
         kind: NativeFunction(ctor_fn(proto_ref)),
-        properties: dict.from_list(ctor_properties(
+        properties: named_props(ctor_properties(
           proto_ref,
           name,
           arity,
@@ -315,7 +325,7 @@ pub fn init_type(
       proto_ref,
       ObjectSlot(
         kind: OrdinaryObject,
-        properties: dict.from_list(proto_properties(ctor_ref, proto_props)),
+        properties: named_props(proto_properties(ctor_ref, proto_props)),
         elements: elements.new(),
         prototype: Some(parent_proto),
         symbol_properties: dict.new(),
@@ -368,12 +378,7 @@ pub fn init_type_on(
       h,
       ObjectSlot(
         kind: NativeFunction(ctor_fn(proto)),
-        properties: dict.from_list(ctor_properties(
-          proto,
-          name,
-          arity,
-          ctor_props,
-        )),
+        properties: named_props(ctor_properties(proto, name, arity, ctor_props)),
         elements: elements.new(),
         prototype: Some(function_proto),
         symbol_properties: dict.new(),
@@ -394,7 +399,7 @@ pub fn init_type_on(
   let new_props =
     list.fold(proto_properties(ctor_ref, proto_props), properties, fn(acc, p) {
       let #(key, val) = p
-      dict.insert(acc, key, val)
+      dict.insert(acc, Named(key), val)
     })
   let h =
     heap.write(
@@ -441,7 +446,7 @@ fn alloc_error(h: Heap, proto: Ref, message: String) -> #(Heap, JsValue) {
         kind: OrdinaryObject,
         // Step 3b: CreateNonEnumerableDataPropertyOrThrow(O, "message", msg)
         // Per §20.5.6.3: writable+configurable, NOT enumerable.
-        properties: dict.from_list([
+        properties: named_props([
           #("message", value.builtin_property(JsString(message))),
         ]),
         elements: elements.new(),

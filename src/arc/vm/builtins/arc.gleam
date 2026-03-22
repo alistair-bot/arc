@@ -77,7 +77,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       #("sleep", ArcNative(ArcSleep), 1),
     ])
 
-  let properties = dict.from_list(methods)
+  let properties = common.named_props(methods)
   let symbol_properties =
     dict.from_list([
       #(
@@ -553,7 +553,7 @@ pub fn alloc_pid_object(
       heap,
       ObjectSlot(
         kind: PidObject(pid:),
-        properties: dict.from_list([
+        properties: common.named_props([
           #("toString", value.builtin_property(JsObject(to_string_ref))),
         ]),
         elements: elements.new(),
@@ -671,10 +671,10 @@ fn serialize_array(
 
 fn serialize_object_props(
   heap: Heap,
-  entries: List(#(String, value.Property)),
+  entries: List(#(value.PropertyKey, value.Property)),
   seen: set.Set(Int),
-  acc: List(#(String, PortableMessage)),
-) -> Result(List(#(String, PortableMessage)), String) {
+  acc: List(#(value.PropertyKey, PortableMessage)),
+) -> Result(List(#(value.PropertyKey, PortableMessage)), String) {
   case entries {
     [] -> Ok(list.reverse(acc))
     [#(key, DataProperty(value: val, enumerable: True, ..)), ..rest] -> {
@@ -684,13 +684,13 @@ fn serialize_object_props(
     [#(key, DataProperty(enumerable: False, ..)), ..] ->
       Error(
         "cannot send object with non-enumerable property \""
-        <> key
+        <> value.key_to_string(key)
         <> "\" between processes",
       )
     [#(key, value.AccessorProperty(..)), ..] ->
       Error(
         "cannot send object with accessor property \""
-        <> key
+        <> value.key_to_string(key)
         <> "\" between processes",
       )
   }
@@ -797,8 +797,8 @@ fn deserialize_symbol_entries(
 fn deserialize_object_entries(
   heap: Heap,
   builtins: common.Builtins,
-  entries: List(#(String, PortableMessage)),
-) -> #(Heap, List(#(String, value.Property))) {
+  entries: List(#(value.PropertyKey, PortableMessage)),
+) -> #(Heap, List(#(value.PropertyKey, value.Property))) {
   let #(heap, rev) =
     list.fold(entries, #(heap, []), fn(acc, entry) {
       let #(heap, props) = acc

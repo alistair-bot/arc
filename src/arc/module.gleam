@@ -457,7 +457,8 @@ fn extract_builtin_exports(h: Heap, b: Builtins) -> Dict(String, JsValue) {
     Some(ObjectSlot(properties: props, ..)) ->
       dict.fold(props, dict.new(), fn(acc, name, prop) {
         case prop {
-          DataProperty(value: v, ..) -> dict.insert(acc, name, v)
+          DataProperty(value: v, ..) ->
+            dict.insert(acc, value.key_to_string(name), v)
           _ -> acc
         }
       })
@@ -499,7 +500,11 @@ fn resolve_imports(
             compiler.NamespaceImport(local:) -> {
               let properties =
                 dict.fold(dep_exports, dict.new(), fn(props, name, val) {
-                  dict.insert(props, name, value.builtin_property(val))
+                  dict.insert(
+                    props,
+                    value.Named(name),
+                    value.builtin_property(val),
+                  )
                 })
               // Per spec §10.4.6, Module Namespace Exotic Objects
               // have a null prototype and are not extensible.
@@ -580,7 +585,11 @@ fn collect_exports(
           Ok(dep_exports) -> {
             let properties =
               dict.fold(dep_exports, dict.new(), fn(props, name, val) {
-                dict.insert(props, name, value.builtin_property(val))
+                dict.insert(
+                  props,
+                  value.Named(name),
+                  value.builtin_property(val),
+                )
               })
             let #(heap, ref) =
               heap.alloc(

@@ -19,7 +19,7 @@ import arc/vm/builtins/weak_map as builtins_weak_map
 import arc/vm/builtins/weak_set as builtins_weak_set
 import arc/vm/heap.{type Heap}
 import arc/vm/internal/elements
-import arc/vm/value.{JsObject, JsUndefined, ObjectSlot, OrdinaryObject}
+import arc/vm/value.{JsObject, JsUndefined, Named, ObjectSlot, OrdinaryObject}
 import gleam/dict
 import gleam/list
 import gleam/option.{None, Some}
@@ -289,7 +289,7 @@ pub fn globals(b: Builtins, h: Heap) -> #(Heap, value.Ref) {
 
   // globalThis heap object — property descriptors for JS-visible reflection
   let properties =
-    list.map(entries, global_entry_to_property) |> dict.from_list()
+    list.map(entries, global_entry_to_property) |> common.named_props()
   let #(h, global_ref) =
     heap.alloc(
       h,
@@ -313,7 +313,7 @@ pub fn globals(b: Builtins, h: Heap) -> #(Heap, value.Ref) {
             ..slot,
             properties: dict.insert(
               props,
-              "globalThis",
+              Named("globalThis"),
               value.builtin_property(JsObject(global_ref)),
             ),
           )

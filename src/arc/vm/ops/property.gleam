@@ -1,11 +1,9 @@
-import arc/vm/heap
-import arc/vm/internal/elements
 import arc/vm/ops/coerce
 import arc/vm/ops/object
-import arc/vm/state.{type State, State}
+import arc/vm/state.{type State}
 import arc/vm/value.{
-  type JsValue, ArrayObject, Finite, JsNumber, JsObject, JsString, JsUndefined,
-  ObjectSlot,
+  type JsValue, type PropertyKey, Finite, Index, JsNumber, JsObject, JsString,
+  Named,
 }
 import gleam/float
 import gleam/int
@@ -16,58 +14,56 @@ import gleam/result
 // Computed property access helpers
 // ============================================================================
 
-/// Read a property from a unified object using a JsValue key.
-/// Dispatches on ExoticKind: arrays use elements dict, others use properties.
-/// Returns Result to handle thrown exceptions from js_to_string (ToPrimitive).
+/// ToPropertyKey (§7.1.19) for non-symbol keys — canonicalizes a JsValue to a
+/// PropertyKey ONCE so downstream [[Get]]/[[Set]] don't round-trip through
+/// strings. Numbers that are valid array indices → Index(n) (no stringify).
+/// Strings go through canonical_key. Everything else → ToString → canonical_key.
+pub fn to_property_key(
+  state: State,
+  key: JsValue,
+) -> Result(#(PropertyKey, State), #(JsValue, State)) {
+  case key {
+    JsNumber(Finite(n)) -> {
+      let i = float.truncate(n)
+      case int.to_float(i) == n && i >= 0 {
+        // Valid array index — skip stringification entirely.
+        True -> Ok(#(Index(i), state))
+        // Non-index number — stringify (e.g. 1.5 → "1.5", -1 → "-1").
+        False -> Ok(#(Named(value.js_format_number(n)), state))
+      }
+    }
+    JsNumber(value.NaN) -> Ok(#(Named("NaN"), state))
+    JsNumber(value.Infinity) -> Ok(#(Named("Infinity"), state))
+    JsNumber(value.NegInfinity) -> Ok(#(Named("-Infinity"), state))
+    JsString(s) -> Ok(#(value.canonical_key(s), state))
+    _ -> {
+      use #(s, state) <- result.map(coerce.js_to_string(state, key))
+      #(value.canonical_key(s), state)
+    }
+  }
+}
+
+/// [[Get]] with a JsValue key — ToPropertyKey (§7.1.19) then delegate to
+/// the single [[Get]] implementation. The elements/properties storage split
+/// is handled by get_own_property; this layer doesn't know about it.
 pub fn get_elem_value(
   state: State,
   ref: value.Ref,
   key: JsValue,
 ) -> Result(#(JsValue, State), #(JsValue, State)) {
   case key {
-    // Symbol keys use the separate symbol_properties dict
     value.JsSymbol(sym_id) ->
       object.get_symbol_value(state, ref, sym_id, JsObject(ref))
     _ -> {
-      // Numeric fast path for arrays/arguments
-      case to_array_index(key) {
-        Some(idx) ->
-          case heap.read(state.heap, ref) {
-            Some(ObjectSlot(kind: ArrayObject(length:), elements:, ..)) ->
-              case idx < length {
-                True -> Ok(#(elements.get(elements, idx), state))
-                False -> Ok(#(JsUndefined, state))
-              }
-            Some(ObjectSlot(
-              kind: value.ArgumentsObject(_),
-              elements:,
-              prototype:,
-              ..,
-            )) ->
-              case elements.get_option(elements, idx) {
-                Some(v) -> Ok(#(v, state))
-                None ->
-                  case prototype {
-                    Some(proto_ref) -> get_elem_value(state, proto_ref, key)
-                    None -> Ok(#(JsUndefined, state))
-                  }
-              }
-            _ ->
-              // Non-array/arguments: delegate to get_value with stringified key
-              object.get_value(state, ref, int.to_string(idx), JsObject(ref))
-          }
-        None -> {
-          // Non-numeric key: stringify and delegate to get_value
-          use #(key_str, state) <- result.try(coerce.js_to_string(state, key))
-          object.get_value(state, ref, key_str, JsObject(ref))
-        }
-      }
+      use #(pk, state) <- result.try(to_property_key(state, key))
+      object.get_value(state, ref, pk, JsObject(ref))
     }
   }
 }
 
-/// Write a property to a unified object using a JsValue key.
-/// Returns Result to handle thrown exceptions from setter calls / js_to_string.
+/// [[Set]] with a JsValue key — ToPropertyKey (§7.1.19) then delegate to
+/// the single [[Set]] implementation. set_value handles setter invocation,
+/// proto-walk, and element storage for Index keys on arrays.
 pub fn put_elem_value(
   state: State,
   ref: value.Ref,
@@ -76,7 +72,6 @@ pub fn put_elem_value(
 ) -> Result(State, #(JsValue, State)) {
   let receiver = JsObject(ref)
   case key {
-    // Symbol keys use the separate symbol_properties dict
     value.JsSymbol(sym_id) -> {
       use #(state, _) <- result.map(object.set_symbol_value(
         state,
@@ -88,101 +83,15 @@ pub fn put_elem_value(
       state
     }
     _ -> {
-      // Numeric fast path for arrays/arguments (direct element write)
-      case to_array_index(key) {
-        Some(idx) ->
-          case heap.read(state.heap, ref) {
-            Some(ObjectSlot(
-              kind: ArrayObject(length:),
-              properties:,
-              elements:,
-              prototype:,
-              symbol_properties:,
-              extensible:,
-            )) ->
-              case extensible {
-                False -> {
-                  // Non-extensible (frozen/sealed): delegate to set_value which
-                  // properly checks writable/configurable/extensible constraints.
-                  use #(state, _) <- result.map(object.set_value(
-                    state,
-                    ref,
-                    int.to_string(idx),
-                    val,
-                    receiver,
-                  ))
-                  state
-                }
-                True -> {
-                  let new_elements = elements.set(elements, idx, val)
-                  let new_length = case idx >= length {
-                    True -> idx + 1
-                    False -> length
-                  }
-                  let new_heap =
-                    heap.write(
-                      state.heap,
-                      ref,
-                      ObjectSlot(
-                        kind: ArrayObject(new_length),
-                        properties:,
-                        elements: new_elements,
-                        prototype:,
-                        symbol_properties:,
-                        extensible:,
-                      ),
-                    )
-                  Ok(State(..state, heap: new_heap))
-                }
-              }
-            Some(ObjectSlot(
-              kind: value.ArgumentsObject(_) as args_kind,
-              properties:,
-              elements:,
-              prototype:,
-              symbol_properties:,
-              extensible:,
-            )) -> {
-              let new_heap =
-                heap.write(
-                  state.heap,
-                  ref,
-                  ObjectSlot(
-                    kind: args_kind,
-                    properties:,
-                    elements: elements.set(elements, idx, val),
-                    prototype:,
-                    symbol_properties:,
-                    extensible:,
-                  ),
-                )
-              Ok(State(..state, heap: new_heap))
-            }
-            _ -> {
-              // Non-array/arguments: delegate to set_value
-              use #(state, _) <- result.map(object.set_value(
-                state,
-                ref,
-                int.to_string(idx),
-                val,
-                receiver,
-              ))
-              state
-            }
-          }
-        None -> {
-          // Non-numeric key: stringify and delegate to set_value
-          use #(key_str, state) <- result.try(coerce.js_to_string(state, key))
-          use #(state, _) <- result.map(object.set_value(
-            state,
-            ref,
-            key_str,
-            val,
-            receiver,
-          ))
-          state
-        }
-      }
+      use #(pk, state) <- result.try(to_property_key(state, key))
+      use #(state, _) <- result.map(object.set_value(
+        state,
+        ref,
+        pk,
+        val,
+        receiver,
+      ))
+      state
     }
   }
 }

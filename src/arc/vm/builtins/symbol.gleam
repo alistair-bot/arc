@@ -22,7 +22,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       h,
       ObjectSlot(
         kind: NativeFunction(Call(SymbolFor)),
-        properties: dict.from_list([
+        properties: common.named_props([
           #("name", common.fn_name_property("for")),
           #("length", common.fn_length_property(1)),
         ]),
@@ -37,7 +37,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       h,
       ObjectSlot(
         kind: NativeFunction(Call(SymbolKeyFor)),
-        properties: dict.from_list([
+        properties: common.named_props([
           #("name", common.fn_name_property("keyFor")),
           #("length", common.fn_length_property(1)),
         ]),
@@ -53,7 +53,7 @@ pub fn init(h: Heap, object_proto: Ref, function_proto: Ref) -> #(Heap, Ref) {
       h,
       ObjectSlot(
         kind: NativeFunction(Call(SymbolConstructor)),
-        properties: dict.from_list([
+        properties: common.named_props([
           #("name", common.fn_name_property("Symbol")),
           #("length", common.fn_length_property(0)),
           #("prototype", value.data(JsObject(object_proto))),

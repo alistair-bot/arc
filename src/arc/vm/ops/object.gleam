@@ -3,10 +3,10 @@ import arc/vm/internal/elements
 import arc/vm/opcode
 import arc/vm/state.{type State, State}
 import arc/vm/value.{
-  type JsElements, type JsValue, type Property, type Ref, type SymbolId,
-  AccessorProperty, ArrayObject, DataProperty, Finite, FunctionObject,
-  GeneratorObject, JsNumber, JsObject, JsString, NativeFunction, ObjectSlot,
-  OrdinaryObject, PromiseObject,
+  type JsElements, type JsValue, type Property, type PropertyKey, type Ref,
+  type SymbolId, AccessorProperty, ArrayObject, DataProperty, Finite,
+  FunctionObject, GeneratorObject, Index, JsNumber, JsObject, JsString, Named,
+  NativeFunction, ObjectSlot, OrdinaryObject, PromiseObject,
 }
 import gleam/dict
 import gleam/int
@@ -35,7 +35,7 @@ import gleam/string
 pub fn get_value_of(
   state: State,
   val: JsValue,
-  key: String,
+  key: PropertyKey,
 ) -> Result(#(JsValue, State), #(JsValue, State)) {
   case val {
     // §7.3.3 step 1: V is already an Object, call O.[[Get]](P, V) directly.
@@ -46,15 +46,12 @@ pub fn get_value_of(
       let len = string.length(s)
       case key {
         // §10.4.3.5 step 7: "length" → {value: len, W:F, E:F, C:F}
-        "length" -> Ok(#(JsNumber(Finite(int.to_float(len))), state))
-        _ ->
-          case int.parse(key) {
-            // §10.4.3.5 steps 3-6,8-14: numeric index → single-char string
-            Ok(idx) if idx >= 0 && idx < len ->
-              Ok(#(JsString(string.slice(s, idx, 1)), state))
-            // Not an own property — delegate to String.prototype via [[Get]]
-            _ -> get_value(state, state.builtins.string.prototype, key, val)
-          }
+        Named("length") -> Ok(#(JsNumber(Finite(int.to_float(len))), state))
+        // §10.4.3.5 steps 3-6,8-14: numeric index → single-char string
+        Index(idx) if idx < len ->
+          Ok(#(JsString(string.slice(s, idx, 1)), state))
+        // Not an own property — delegate to String.prototype via [[Get]]
+        _ -> get_value(state, state.builtins.string.prototype, key, val)
       }
     }
     // Primitive→prototype delegation (ToObject would wrap, we skip the wrapper)
@@ -93,7 +90,7 @@ pub fn get_value_of(
 pub fn get_value(
   state: State,
   ref: Ref,
-  key: String,
+  key: PropertyKey,
   receiver: JsValue,
 ) -> Result(#(JsValue, State), #(JsValue, State)) {
   // Step 1: Let desc be ? O.[[GetOwnProperty]](P).
@@ -179,74 +176,84 @@ fn string_at(s: String, idx: Int) -> Option(String) {
 /// We check "length" as a special string key for Array and String objects
 /// rather than routing through a separate internal slot. The properties dict
 /// lookup for ordinary objects (step 1) is inlined.
-pub fn get_own_property(heap: Heap, ref: Ref, key: String) -> Option(Property) {
+pub fn get_own_property(
+  heap: Heap,
+  ref: Ref,
+  key: PropertyKey,
+) -> Option(Property) {
   case heap.read(heap, ref) {
     Some(ObjectSlot(kind:, properties:, elements:, ..)) ->
       case kind {
         // --- Array exotic [[GetOwnProperty]] (§10.4.2) ---
+        // Per spec this IS OrdinaryGetOwnProperty — arrays only override
+        // [[DefineOwnProperty]]. Our elements/properties split is an internal
+        // optimization: properties dict is authoritative (holds accessors set
+        // via Object.defineProperty(arr, "0", {get:...})), elements is the
+        // fast-path data-value cache. Check properties first.
         ArrayObject(length:) ->
           case key {
             // Virtual "length" property (§10.4.2.4 ArraySetLength)
-            "length" ->
+            Named("length") ->
               Some(DataProperty(
                 value: JsNumber(Finite(int.to_float(length))),
                 writable: True,
                 enumerable: False,
                 configurable: False,
               ))
-            _ ->
-              case int.parse(key) {
-                // Array index property from elements storage
-                Ok(idx) if idx >= 0 ->
+            Index(idx) ->
+              case dict_get_option(properties, key) {
+                // accessor override at this index wins
+                Some(prop) -> Some(prop)
+                None ->
                   case elements.has(elements, idx) {
                     True ->
                       Some(value.data_property(elements.get(elements, idx)))
-                    False -> dict_get_option(properties, key)
+                    False -> None
                   }
-                // Non-index key → OrdinaryGetOwnProperty (§10.1.5.1)
-                _ -> dict_get_option(properties, key)
               }
+            Named(_) -> dict_get_option(properties, key)
           }
         // --- Arguments exotic [[GetOwnProperty]] (§10.4.4) ---
         value.ArgumentsObject(_) ->
-          case int.parse(key) {
-            Ok(idx) if idx >= 0 ->
-              case elements.get_option(elements, idx) {
-                Some(val) -> Some(value.data_property(val))
-                None -> dict_get_option(properties, key)
+          case key {
+            Index(idx) ->
+              case dict_get_option(properties, key) {
+                Some(prop) -> Some(prop)
+                None ->
+                  option.map(
+                    elements.get_option(elements, idx),
+                    value.data_property,
+                  )
               }
-            _ -> dict_get_option(properties, key)
+            Named(_) -> dict_get_option(properties, key)
           }
         // --- String exotic [[GetOwnProperty]] (§10.4.3.1) ---
         value.StringObject(value: s) ->
           case key {
             // §10.4.3.5 step 7: "length" → {value: len, W:F, E:F, C:F}
-            "length" ->
+            Named("length") ->
               Some(DataProperty(
                 value: JsNumber(Finite(int.to_float(string.length(s)))),
                 writable: False,
                 enumerable: False,
                 configurable: False,
               ))
-            _ ->
-              case int.parse(key) {
-                // §10.4.3.5 steps 3-6: CanonicalNumericIndexString → integer index
-                Ok(idx) if idx >= 0 ->
-                  case string_at(s, idx) {
-                    // §10.4.3.5 steps 10-14: return {value: char, W:F, E:T, C:F}
-                    Some(ch) ->
-                      Some(DataProperty(
-                        value: JsString(ch),
-                        writable: False,
-                        enumerable: True,
-                        configurable: False,
-                      ))
-                    // §10.4.3.5 step 9: index >= len → undefined, fall to ordinary
-                    None -> dict_get_option(properties, key)
-                  }
-                // §10.4.3.1 step 1-2: not a numeric index → OrdinaryGetOwnProperty
-                _ -> dict_get_option(properties, key)
+            // §10.4.3.5 steps 3-6: CanonicalNumericIndexString → integer index
+            Index(idx) ->
+              case string_at(s, idx) {
+                // §10.4.3.5 steps 10-14: return {value: char, W:F, E:T, C:F}
+                Some(ch) ->
+                  Some(DataProperty(
+                    value: JsString(ch),
+                    writable: False,
+                    enumerable: True,
+                    configurable: False,
+                  ))
+                // §10.4.3.5 step 9: index >= len → undefined, fall to ordinary
+                None -> dict_get_option(properties, key)
               }
+            // §10.4.3.1 step 1-2: not a numeric index → OrdinaryGetOwnProperty
+            Named(_) -> dict_get_option(properties, key)
           }
         // --- Ordinary [[GetOwnProperty]] (§10.1.5.1) ---
         _ -> dict_get_option(properties, key)
@@ -260,8 +267,8 @@ pub fn get_own_property(heap: Heap, ref: Ref, key: String) -> Option(Property) {
 /// the object's own property storage. Returns None (spec "undefined") if
 /// the key is not present, or Some(descriptor) if found.
 fn dict_get_option(
-  d: dict.Dict(String, Property),
-  key: String,
+  d: dict.Dict(PropertyKey, Property),
+  key: PropertyKey,
 ) -> Option(Property) {
   dict.get(d, key) |> option.from_result
 }
@@ -274,7 +281,7 @@ fn dict_get_option(
 pub fn set_value(
   state: State,
   ref: Ref,
-  key: String,
+  key: PropertyKey,
   val: JsValue,
   receiver: JsValue,
 ) -> Result(#(State, Bool), #(JsValue, State)) {
@@ -328,7 +335,7 @@ pub fn set_value(
 fn set_on_receiver(
   state: State,
   receiver: JsValue,
-  key: String,
+  key: PropertyKey,
   val: JsValue,
 ) -> Result(#(State, Bool), #(JsValue, State)) {
   case receiver {
@@ -371,7 +378,7 @@ fn set_on_receiver(
 pub fn set_property(
   h: Heap,
   ref: Ref,
-  key: String,
+  key: PropertyKey,
   val: JsValue,
 ) -> #(Heap, Bool) {
   case heap.read(h, ref) {
@@ -381,42 +388,39 @@ pub fn set_property(
         ArrayObject(length:) ->
           case key {
             // §10.4.2.1 step 1: If P is "length", return ArraySetLength(A, Desc).
-            "length" -> array_set_length(h, ref, val, slot, length)
-            _ ->
-              case int.parse(key) {
-                // §10.4.2.1 step 2: If P is an array index (ToUint32 is valid index):
-                Ok(idx) if idx >= 0 ->
-                  // §10.4.2.1 step 2.b: If index >= oldLen, growing length —
-                  // check extensible first (non-extensible can't add new indices).
-                  case idx >= length && !extensible {
-                    True -> #(h, False)
-                    False -> {
-                      // §10.4.2.1 step 2.c-d: Set element, update length to max(oldLen, index+1).
-                      let new_elements = elements.set(elements, idx, val)
-                      let new_length = int.max(length, idx + 1)
-                      #(
-                        heap.write(
-                          h,
-                          ref,
-                          ObjectSlot(
-                            ..slot,
-                            kind: ArrayObject(new_length),
-                            elements: new_elements,
-                          ),
-                        ),
-                        True,
-                      )
-                    }
-                  }
-                // §10.4.2.1 step 3: Not "length" and not array index —
-                // OrdinaryDefineOwnProperty(A, P, Desc).
-                _ -> set_string_property(h, ref, key, val, slot)
+            Named("length") -> array_set_length(h, ref, val, slot, length)
+            // §10.4.2.1 step 2: If P is an array index (ToUint32 is valid index):
+            Index(idx) ->
+              // §10.4.2.1 step 2.b: If index >= oldLen, growing length —
+              // check extensible first (non-extensible can't add new indices).
+              case idx >= length && !extensible {
+                True -> #(h, False)
+                False -> {
+                  // §10.4.2.1 step 2.c-d: Set element, update length to max(oldLen, index+1).
+                  let new_elements = elements.set(elements, idx, val)
+                  let new_length = int.max(length, idx + 1)
+                  #(
+                    heap.write(
+                      h,
+                      ref,
+                      ObjectSlot(
+                        ..slot,
+                        kind: ArrayObject(new_length),
+                        elements: new_elements,
+                      ),
+                    ),
+                    True,
+                  )
+                }
               }
+            // §10.4.2.1 step 3: Not "length" and not array index —
+            // OrdinaryDefineOwnProperty(A, P, Desc).
+            Named(_) -> set_string_property(h, ref, key, val, slot)
           }
         // --- §10.4.4 Arguments exotic — similar element-based storage ---
         value.ArgumentsObject(_) ->
-          case int.parse(key) {
-            Ok(idx) if idx >= 0 ->
+          case key {
+            Index(idx) ->
               case !extensible && !elements.has(elements, idx) {
                 True -> #(h, False)
                 False -> #(
@@ -431,7 +435,7 @@ pub fn set_property(
                   True,
                 )
               }
-            _ -> set_string_property(h, ref, key, val, slot)
+            Named(_) -> set_string_property(h, ref, key, val, slot)
           }
         // --- §10.4.3.2 String exotic [[DefineOwnProperty]] ---
         value.StringObject(value: s) -> {
@@ -441,11 +445,9 @@ pub fn set_property(
           // so [[DefineOwnProperty]] returns false for any change.
           // §10.4.3.2 step 3: "length" is also immutable.
           let is_guarded = case key {
-            "length" -> True
-            _ ->
-              int.parse(key)
-              |> result.map(fn(idx) { idx >= 0 && idx < len })
-              |> result.unwrap(False)
+            Named("length") -> True
+            Index(idx) -> idx < len
+            Named(_) -> False
           }
           case is_guarded {
             // §10.4.3.2: Reject — property is immutable on String exotic.
@@ -567,7 +569,7 @@ fn truncate_elements(
 fn set_string_property(
   h: Heap,
   ref: Ref,
-  key: String,
+  key: PropertyKey,
   val: JsValue,
   slot: value.HeapSlot,
 ) -> #(Heap, Bool) {
@@ -630,7 +632,12 @@ fn set_string_property(
 /// Ignores the return value (spec returns a Boolean from
 /// [[DefineOwnProperty]]). Does not throw on failure — callers use this
 /// only in contexts where success is guaranteed (fresh objects, literals).
-fn define_own_property(heap: Heap, ref: Ref, key: String, val: JsValue) -> Heap {
+fn define_own_property(
+  heap: Heap,
+  ref: Ref,
+  key: PropertyKey,
+  val: JsValue,
+) -> Heap {
   use slot <- heap.update(heap, ref)
   case slot {
     ObjectSlot(properties:, ..) -> {
@@ -654,7 +661,7 @@ fn define_own_property(heap: Heap, ref: Ref, key: String, val: JsValue) -> Heap 
 pub fn define_method_property(
   heap: Heap,
   ref: Ref,
-  key: String,
+  key: PropertyKey,
   val: JsValue,
 ) -> Heap {
   use slot <- heap.update(heap, ref)
@@ -685,7 +692,7 @@ pub fn define_method_property(
 pub fn define_accessor(
   heap: Heap,
   ref: Ref,
-  key: String,
+  key: PropertyKey,
   func: JsValue,
   kind: opcode.AccessorKind,
 ) -> Heap {
@@ -750,7 +757,7 @@ pub fn define_accessor(
 ///
 /// Pure (no Result) — our GetOwnProperty and GetPrototypeOf cannot throw
 /// (no Proxy traps), so steps 1/3 never produce abrupt completions.
-pub fn has_property(heap: Heap, ref: Ref, key: String) -> Bool {
+pub fn has_property(heap: Heap, ref: Ref, key: PropertyKey) -> Bool {
   // Step 1-2: Let hasOwn be O.[[GetOwnProperty]](P). If not undefined, return true.
   case get_own_property(heap, ref, key) {
     Some(_) -> True
@@ -779,14 +786,14 @@ pub fn has_property(heap: Heap, ref: Ref, key: String) -> Bool {
 /// TODO(Deviation): for arrays/arguments, our elements are always configurable, so
 /// element deletion always succeeds. Needs per-element property descriptors
 /// to reject deletion of non-configurable index properties per spec.
-pub fn delete_property(h: Heap, ref: Ref, key: String) -> #(Heap, Bool) {
+pub fn delete_property(h: Heap, ref: Ref, key: PropertyKey) -> #(Heap, Bool) {
   case heap.read(h, ref) {
     Some(ObjectSlot(kind:, elements:, ..) as slot) ->
       case kind {
         // Array/Arguments exotic: check if key is an array index
         ArrayObject(_) | value.ArgumentsObject(_) ->
-          case int.parse(key) {
-            Ok(idx) ->
+          case key {
+            Index(idx) ->
               // Step 1-2: Check if element exists; if not, return true.
               case elements.has(elements, idx) {
                 // Step 3: Element exists (implicitly configurable) — remove and return true.
@@ -801,7 +808,7 @@ pub fn delete_property(h: Heap, ref: Ref, key: String) -> #(Heap, Bool) {
                 // Step 2: desc is undefined → return true.
                 False -> #(h, True)
               }
-            Error(_) -> delete_string_property(h, ref, key, slot)
+            Named(_) -> delete_string_property(h, ref, key, slot)
           }
         _ -> delete_string_property(h, ref, key, slot)
       }
@@ -819,7 +826,7 @@ pub fn delete_property(h: Heap, ref: Ref, key: String) -> #(Heap, Bool) {
 fn delete_string_property(
   h: Heap,
   ref: Ref,
-  key: String,
+  key: PropertyKey,
   slot: value.HeapSlot,
 ) -> #(Heap, Bool) {
   case slot {
@@ -895,17 +902,18 @@ fn enumerate_keys_loop(
           let #(final_acc, final_seen) =
             dict.fold(properties, #(elem_acc, elem_seen), fn(state, key, prop) {
               let #(a, s) = state
-              case set.contains(s, key) {
+              let k = value.key_to_string(key)
+              case set.contains(s, k) {
                 True -> #(a, s)
                 False ->
                   case prop {
                     // Step 3.a.ii: desc.[[Enumerable]] is true → append key.
                     DataProperty(enumerable: True, ..) -> #(
-                      [key, ..a],
-                      set.insert(s, key),
+                      [k, ..a],
+                      set.insert(s, k),
                     )
                     // Non-enumerable or accessor: mark seen but don't include.
-                    _ -> #(a, set.insert(s, key))
+                    _ -> #(a, set.insert(s, k))
                   }
               }
             })
@@ -1037,7 +1045,7 @@ fn copy_keys_to_target(
   state: State,
   src_ref: Ref,
   target_ref: Ref,
-  keys: List(String),
+  keys: List(PropertyKey),
   cont: fn(State) -> Result(State, #(JsValue, State)),
 ) -> Result(State, #(JsValue, State)) {
   case keys {
@@ -1090,7 +1098,7 @@ fn copy_element_range(
             define_own_property(
               heap,
               target_ref,
-              int.to_string(idx),
+              Index(idx),
               elements.get(elements, idx),
             )
           copy_element_range(h, target_ref, elements, idx + 1, end)
@@ -1319,14 +1327,14 @@ fn inspect_object(
         ArrayObject(length:) ->
           inspect_array(heap, elements, length, depth, visited)
         FunctionObject(..) -> {
-          let name = case dict.get(properties, "name") {
+          let name = case dict.get(properties, Named("name")) {
             Ok(DataProperty(value: JsString(n), ..)) -> n
             _ -> "anonymous"
           }
           "[Function: " <> name <> "]"
         }
         NativeFunction(_) -> {
-          let name = case dict.get(properties, "name") {
+          let name = case dict.get(properties, Named("name")) {
             Ok(DataProperty(value: JsString(n), ..)) -> n
             _ -> "native"
           }
@@ -1362,10 +1370,10 @@ fn inspect_object(
           "/" <> source <> "/" <> flags
         }
         OrdinaryObject ->
-          case dict.get(properties, "message") {
+          case dict.get(properties, Named("message")) {
             // Error objects: display as "ErrorName: message"
             Ok(DataProperty(value: JsString(msg), ..)) -> {
-              let name = case dict.get(properties, "name") {
+              let name = case dict.get(properties, Named("name")) {
                 Ok(DataProperty(value: JsString(n), ..)) -> n
                 _ -> inspect_error_name(heap, ref)
               }
@@ -1415,7 +1423,7 @@ fn inspect_array_loop(
 
 fn inspect_plain_object(
   heap: Heap,
-  properties: dict.Dict(String, value.Property),
+  properties: dict.Dict(PropertyKey, value.Property),
   depth: Int,
   visited: set.Set(Int),
 ) -> String {
@@ -1425,7 +1433,11 @@ fn inspect_plain_object(
       let #(key, prop) = pair
       case prop {
         DataProperty(enumerable: True, value: val, ..) ->
-          Ok(key <> ": " <> inspect_inner(val, heap, depth + 1, visited))
+          Ok(
+            value.key_to_string(key)
+            <> ": "
+            <> inspect_inner(val, heap, depth + 1, visited),
+          )
         _ -> Error(Nil)
       }
     })
@@ -1441,7 +1453,7 @@ fn inspect_error_name(heap: Heap, ref: value.Ref) -> String {
     Some(ObjectSlot(prototype: Some(proto_ref), ..)) ->
       case heap.read(heap, proto_ref) {
         Some(ObjectSlot(properties: proto_props, ..)) ->
-          case dict.get(proto_props, "name") {
+          case dict.get(proto_props, Named("name")) {
             Ok(DataProperty(value: JsString(n), ..)) -> n
             _ -> "Error"
           }

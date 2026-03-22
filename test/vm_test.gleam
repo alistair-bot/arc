@@ -27,7 +27,7 @@ fn get_data(
   ref: value.Ref,
   key: String,
 ) -> Result(value.JsValue, Nil) {
-  case object.get_own_property(h, ref, key) {
+  case object.get_own_property(h, ref, value.Named(key)) {
     Some(DataProperty(value: val, ..)) -> Ok(val)
     Some(AccessorProperty(..)) -> Error(Nil)
     None ->

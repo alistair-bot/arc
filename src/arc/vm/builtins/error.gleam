@@ -5,7 +5,7 @@ import arc/vm/ops/object
 import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type ErrorNativeFn, type JsValue, type Ref, Dispatch, ErrorConstructor,
-  ErrorNative, JsNull, JsObject, JsString, JsUndefined, ObjectSlot,
+  ErrorNative, JsNull, JsObject, JsString, JsUndefined, Named, ObjectSlot,
   OrdinaryObject,
 }
 import gleam/dict
@@ -177,14 +177,14 @@ fn call_native(
       alloc_error(
         state,
         proto,
-        dict.from_list([#("message", value.builtin_property(JsString(msg)))]),
+        common.named_props([#("message", value.builtin_property(JsString(msg)))]),
       )
     [other, ..] -> {
       use msg, state <- state.try_to_string(state, other)
       alloc_error(
         state,
         proto,
-        dict.from_list([#("message", value.builtin_property(JsString(msg)))]),
+        common.named_props([#("message", value.builtin_property(JsString(msg)))]),
       )
     }
   }
@@ -193,7 +193,7 @@ fn call_native(
 fn alloc_error(
   state: State,
   proto: Ref,
-  props: dict.Dict(String, value.Property),
+  props: dict.Dict(value.PropertyKey, value.Property),
 ) -> #(State, Result(JsValue, JsValue)) {
   let #(heap, ref) =
     heap.alloc(
@@ -236,7 +236,7 @@ fn error_to_string(
       use name_val, state <- state.try_op(object.get_value(
         state,
         ref,
-        "name",
+        Named("name"),
         this,
       ))
       // Steps 4-5: If undefined → "Error", else ToString(name).
@@ -265,7 +265,7 @@ fn error_to_string_msg(
   use msg_val, state <- state.try_op(object.get_value(
     state,
     ref,
-    "message",
+    Named("message"),
     this,
   ))
   // Steps 7-8: If undefined → "", else ToString(msg).

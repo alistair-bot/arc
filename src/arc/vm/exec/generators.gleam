@@ -12,7 +12,7 @@ import arc/vm/state.{
 }
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, GeneratorObject, GeneratorSlot,
-  JsBool, JsObject, JsUndefined, ObjectSlot, OrdinaryObject,
+  JsBool, JsObject, JsUndefined, Named, ObjectSlot, OrdinaryObject,
 }
 import gleam/dict
 import gleam/list
@@ -676,8 +676,8 @@ pub fn create_iterator_result(
       ObjectSlot(
         kind: OrdinaryObject,
         properties: dict.from_list([
-          #("value", value.data_property(val)),
-          #("done", value.data_property(JsBool(done))),
+          #(Named("value"), value.data_property(val)),
+          #(Named("done"), value.data_property(JsBool(done))),
         ]),
         elements: elements.new(),
         prototype: Some(builtins.object.prototype),

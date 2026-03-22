@@ -6476,7 +6476,7 @@ pub fn module_repl_harness_globals_test() -> Nil {
 
   // Verify greetFromHarness is on globalThis object
   let assert True =
-    object.has_property(h, env.global_object, "greetFromHarness")
+    object.has_property(h, env.global_object, value.Named("greetFromHarness"))
 
   // Step 2: Compile and run a module that uses the harness function
   let module_source = "greetFromHarness()"

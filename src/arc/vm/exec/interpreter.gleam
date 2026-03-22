@@ -36,7 +36,7 @@ import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, ArrayIteratorSlot, ArrayObject,
   DataProperty, Finite, ForInIteratorSlot, FunctionObject, GeneratorObject,
   JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined, JsUninitialized,
-  NativeFunction, ObjectSlot, OrdinaryObject,
+  Named, NativeFunction, ObjectSlot, OrdinaryObject,
 }
 import gleam/dict
 import gleam/int
@@ -571,8 +571,9 @@ fn step_globals(
         Ok(value) ->
           Ok(State(..state, stack: [value, ..state.stack], pc: state.pc + 1))
         // Not in lexical → try object record (globalThis)
-        Error(_) ->
-          case object.get_own_property(state.heap, state.global_object, name) {
+        Error(_) -> {
+          let key = Named(name)
+          case object.get_own_property(state.heap, state.global_object, key) {
             Some(DataProperty(value: val, ..)) ->
               Ok(State(..state, stack: [val, ..state.stack], pc: state.pc + 1))
             Some(value.AccessorProperty(get: Some(getter), ..)) ->
@@ -599,13 +600,13 @@ fn step_globals(
               )
             None ->
               // Check prototype chain
-              case object.has_property(state.heap, state.global_object, name) {
+              case object.has_property(state.heap, state.global_object, key) {
                 True ->
                   case
                     object.get_value_of(
                       state,
                       JsObject(state.global_object),
-                      name,
+                      key,
                     )
                   {
                     Ok(#(val, state)) ->
@@ -623,6 +624,7 @@ fn step_globals(
                   state.throw_reference_error(state, name <> " is not defined")
               }
           }
+        }
       }
     }
 
@@ -656,7 +658,8 @@ fn step_globals(
                     ),
                   )
                 // 3. Object record path
-                Error(_) ->
+                Error(_) -> {
+                  let key = Named(name)
                   case state.func.is_strict {
                     True ->
                       // Strict mode: must exist on globalThis or throw
@@ -664,7 +667,7 @@ fn step_globals(
                         object.has_property(
                           state.heap,
                           state.global_object,
-                          name,
+                          key,
                         )
                       {
                         False ->
@@ -677,7 +680,7 @@ fn step_globals(
                             object.set_value(
                               State(..state, stack: rest),
                               state.global_object,
-                              name,
+                              key,
                               value,
                               JsObject(state.global_object),
                             )
@@ -702,7 +705,7 @@ fn step_globals(
                         object.set_value(
                           State(..state, stack: rest),
                           state.global_object,
-                          name,
+                          key,
                           value,
                           JsObject(state.global_object),
                         )
@@ -712,6 +715,7 @@ fn step_globals(
                           Error(#(Thrown, thrown, state.heap))
                       }
                   }
+                }
               }
           }
         }
@@ -726,7 +730,8 @@ fn step_globals(
 
     // §9.1.1.4.17 CreateGlobalVarBinding — create var on globalThis
     DeclareGlobalVar(name) -> {
-      case object.has_property(state.heap, state.global_object, name) {
+      let key = Named(name)
+      case object.has_property(state.heap, state.global_object, key) {
         True ->
           // Already exists — no-op
           Ok(State(..state, pc: state.pc + 1))
@@ -735,7 +740,7 @@ fn step_globals(
             object.set_property(
               state.heap,
               state.global_object,
-              name,
+              key,
               JsUndefined,
             )
           Ok(State(..state, heap:, pc: state.pc + 1))
@@ -825,19 +830,20 @@ fn step_globals(
           )
         Error(_) -> {
           // Object record: try globalThis, return "undefined" if not found
+          let key = Named(name)
           let val = case
-            object.get_own_property(state.heap, state.global_object, name)
+            object.get_own_property(state.heap, state.global_object, key)
           {
             Some(DataProperty(value: v, ..)) -> v
             _ ->
-              case object.has_property(state.heap, state.global_object, name) {
+              case object.has_property(state.heap, state.global_object, key) {
                 True ->
                   // Property exists on proto chain — use get_value_of for correct result
                   case
                     object.get_value_of(
                       state,
                       JsObject(state.global_object),
-                      name,
+                      key,
                     )
                   {
                     Ok(#(v, _)) -> v
@@ -889,9 +895,9 @@ fn step_operators(
               // left = key, right = object
               case right {
                 JsObject(ref) ->
-                  case coerce.js_to_string(state, left) {
-                    Ok(#(key_str, state)) -> {
-                      let result = object.has_property(state.heap, ref, key_str)
+                  case property.to_property_key(state, left) {
+                    Ok(#(pk, state)) -> {
+                      let result = object.has_property(state.heap, ref, pk)
                       Ok(
                         State(
                           ..state,
@@ -1283,6 +1289,7 @@ fn step_objects(
     }
 
     GetField(name) -> {
+      let key = value.canonical_key(name)
       case state.stack {
         [JsNull as v, ..] | [JsUndefined as v, ..] ->
           state.throw_type_error(
@@ -1295,7 +1302,7 @@ fn step_objects(
           )
         [receiver, ..rest] -> {
           use #(val, state) <- result.map(
-            state.rethrow(object.get_value_of(state, receiver, name)),
+            state.rethrow(object.get_value_of(state, receiver, key)),
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
@@ -1311,6 +1318,7 @@ fn step_objects(
     GetField2(name) -> {
       // Like GetField but keeps the object on the stack for CallMethod.
       // Stack: [obj, ..rest] → [prop_value, obj, ..rest]
+      let key = value.canonical_key(name)
       case state.stack {
         [JsNull as v, ..] | [JsUndefined as v, ..] ->
           state.throw_type_error(
@@ -1323,7 +1331,7 @@ fn step_objects(
           )
         [receiver, ..rest] -> {
           use #(val, state) <- result.map(
-            state.rethrow(object.get_value_of(state, receiver, name)),
+            state.rethrow(object.get_value_of(state, receiver, key)),
           )
           State(..state, stack: [val, receiver, ..rest], pc: state.pc + 1)
         }
@@ -1339,12 +1347,13 @@ fn step_objects(
     PutField(name) -> {
       // Consumes [value, obj] and pushes value back (assignment is an expression).
       // Consistent with PutElem which also leaves the value on the stack.
+      let key = value.canonical_key(name)
       case state.stack {
         [value, JsObject(ref) as receiver, ..rest] -> {
           // set_value walks proto chain, calls setters, handles non-writable.
           // Sloppy mode: ignore failure (strict mode TypeError is a TODO).
           use #(state, _ok) <- result.map(
-            state.rethrow(object.set_value(state, ref, name, value, receiver)),
+            state.rethrow(object.set_value(state, ref, key, value, receiver)),
           )
           State(..state, stack: [value, ..rest], pc: state.pc + 1)
         }
@@ -1363,9 +1372,10 @@ fn step_objects(
 
     DefineField(name) -> {
       // Like PutField but keeps the object on the stack (for object literal construction)
+      let key = value.canonical_key(name)
       case state.stack {
         [value, JsObject(ref) as obj, ..rest] -> {
-          let #(heap, _) = object.set_property(state.heap, ref, name, value)
+          let #(heap, _) = object.set_property(state.heap, ref, key, value)
           Ok(State(..state, heap:, stack: [obj, ..rest], pc: state.pc + 1))
         }
         [_, _, ..] -> {
@@ -1383,9 +1393,10 @@ fn step_objects(
 
     DefineMethod(name) -> {
       // Like DefineField but creates a non-enumerable property (for class methods)
+      let key = value.canonical_key(name)
       case state.stack {
         [value, JsObject(ref) as obj, ..rest] -> {
-          let heap = object.define_method_property(state.heap, ref, name, value)
+          let heap = object.define_method_property(state.heap, ref, key, value)
           Ok(State(..state, heap:, stack: [obj, ..rest], pc: state.pc + 1))
         }
         [_, _, ..] -> Ok(State(..state, pc: state.pc + 1))
@@ -1402,9 +1413,10 @@ fn step_objects(
       // Object literal getter/setter: { get x() {}, set x(v) {} }
       // Stack: [fn, obj, ...] → [obj, ...]
       // Defines or updates an AccessorProperty on the object.
+      let key = value.canonical_key(name)
       case state.stack {
         [func, JsObject(ref) as obj, ..rest] -> {
-          let heap = object.define_accessor(state.heap, ref, name, func, kind)
+          let heap = object.define_accessor(state.heap, ref, key, func, kind)
           Ok(State(..state, heap:, stack: [obj, ..rest], pc: state.pc + 1))
         }
         [_, _, ..] -> Ok(State(..state, pc: state.pc + 1))
@@ -1422,11 +1434,10 @@ fn step_objects(
       // Stack: [fn, key, obj, ...] → [obj, ...]
       case state.stack {
         [func, key, JsObject(ref) as obj, ..rest] -> {
-          use #(key_str, state) <- result.map(
-            state.rethrow(coerce.js_to_string(state, key)),
+          use #(pk, state) <- result.map(
+            state.rethrow(property.to_property_key(state, key)),
           )
-          let heap =
-            object.define_accessor(state.heap, ref, key_str, func, kind)
+          let heap = object.define_accessor(state.heap, ref, pk, func, kind)
           State(..state, heap:, stack: [obj, ..rest], pc: state.pc + 1)
         }
         [_, _, _, ..] -> Ok(State(..state, pc: state.pc + 1))
@@ -1488,12 +1499,13 @@ fn step_objects(
 
     // -- Delete operator --
     DeleteField(name) -> {
+      let key = value.canonical_key(name)
       case state.stack {
         [obj, ..rest] ->
           case obj {
             JsObject(ref) -> {
               let #(heap, success) =
-                object.delete_property(state.heap, ref, name)
+                object.delete_property(state.heap, ref, key)
               Ok(
                 State(
                   ..state,
@@ -1523,11 +1535,10 @@ fn step_objects(
         [key, obj, ..rest] ->
           case obj {
             JsObject(ref) -> {
-              use #(key_str, state) <- result.map(
-                state.rethrow(coerce.js_to_string(state, key)),
+              use #(pk, state) <- result.map(
+                state.rethrow(property.to_property_key(state, key)),
               )
-              let #(heap, success) =
-                object.delete_property(state.heap, ref, key_str)
+              let #(heap, success) = object.delete_property(state.heap, ref, pk)
               State(
                 ..state,
                 stack: [JsBool(success), ..rest],
@@ -1738,12 +1749,12 @@ fn step_arrays(
             "Cannot read properties of " <> value.nullish_label(v),
           )
         [key, receiver, ..rest] -> {
-          // Primitive receiver: stringify key, delegate to get_value_of
-          use #(key_str, state) <- result.try(
-            state.rethrow(coerce.js_to_string(state, key)),
+          // Primitive receiver: canonicalize key, delegate to get_value_of
+          use #(pk, state) <- result.try(
+            state.rethrow(property.to_property_key(state, key)),
           )
           use #(val, state) <- result.map(
-            state.rethrow(object.get_value_of(state, receiver, key_str)),
+            state.rethrow(object.get_value_of(state, receiver, pk)),
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
@@ -1766,11 +1777,11 @@ fn step_arrays(
           State(..state, stack: [val, key, obj, ..rest], pc: state.pc + 1)
         }
         [key, receiver, ..rest] -> {
-          use #(key_str, state) <- result.try(
-            state.rethrow(coerce.js_to_string(state, key)),
+          use #(pk, state) <- result.try(
+            state.rethrow(property.to_property_key(state, key)),
           )
           use #(val, state) <- result.map(
-            state.rethrow(object.get_value_of(state, receiver, key_str)),
+            state.rethrow(object.get_value_of(state, receiver, pk)),
           )
           State(..state, stack: [val, key, receiver, ..rest], pc: state.pc + 1)
         }
@@ -2025,7 +2036,9 @@ fn step_calls(
                   let #(heap, this_val) = case state.this_binding {
                     JsUninitialized -> {
                       // First super() in chain — allocate new object
-                      let derived_proto = case dict.get(my_props, "prototype") {
+                      let derived_proto = case
+                        dict.get(my_props, Named("prototype"))
+                      {
                         Ok(DataProperty(value: JsObject(dp_ref), ..)) ->
                           Some(dp_ref)
                         _ -> Some(state.builtins.object.prototype)
@@ -2191,7 +2204,10 @@ fn step_calls(
           let #(heap, fn_properties, proto_ref) = case child_template.is_arrow {
             True -> #(
               heap,
-              dict.from_list([#("name", name_prop), #("length", length_prop)]),
+              dict.from_list([
+                #(Named("name"), name_prop),
+                #(Named("length"), length_prop),
+              ]),
               None,
             )
             False -> {
@@ -2211,11 +2227,11 @@ fn step_calls(
                 h,
                 dict.from_list([
                   #(
-                    "prototype",
+                    Named("prototype"),
                     value.data(JsObject(proto_obj_ref)) |> value.writable(),
                   ),
-                  #("name", name_prop),
-                  #("length", length_prop),
+                  #(Named("name"), name_prop),
+                  #(Named("length"), length_prop),
                 ]),
                 Some(proto_obj_ref),
               )
@@ -2246,7 +2262,7 @@ fn step_calls(
                     ..slot,
                     properties: dict.insert(
                       props,
-                      "constructor",
+                      Named("constructor"),
                       value.builtin_property(JsObject(closure_ref)),
                     ),
                   )
@@ -2510,11 +2526,11 @@ fn step_iteration(
                   [JsObject(result_ref), ..] ->
                     case heap.read(next_state.heap, result_ref) {
                       Some(ObjectSlot(properties: props, ..)) -> {
-                        let val = case dict.get(props, "value") {
+                        let val = case dict.get(props, Named("value")) {
                           Ok(DataProperty(value: v, ..)) -> v
                           _ -> JsUndefined
                         }
-                        let done = case dict.get(props, "done") {
+                        let done = case dict.get(props, Named("done")) {
                           Ok(DataProperty(value: JsBool(d), ..)) -> d
                           _ -> False
                         }
@@ -2640,13 +2656,13 @@ fn step_special(
       let props =
         dict.from_list([
           #(
-            "length",
+            Named("length"),
             value.data(JsNumber(Finite(int.to_float(length))))
               |> value.writable
               |> value.configurable,
           ),
           #(
-            "callee",
+            Named("callee"),
             value.data(callee) |> value.writable |> value.configurable,
           ),
         ])
@@ -2885,7 +2901,7 @@ fn get_field_ref(h: Heap, obj_ref: value.Ref, name: String) -> Option(value.Ref)
   use slot <- option.then(heap.read(h, obj_ref))
   case slot {
     ObjectSlot(properties: props, ..) ->
-      case dict.get(props, name) {
+      case dict.get(props, Named(name)) {
         Ok(DataProperty(value: JsObject(ref), ..)) -> Some(ref)
         _ -> None
       }

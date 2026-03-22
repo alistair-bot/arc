@@ -28,9 +28,13 @@ fn dummy_template() -> FuncTemplate {
 }
 
 fn ordinary(props: dict.Dict(String, value.JsValue)) {
+  let keyed =
+    dict.fold(props, dict.new(), fn(acc, k, v) {
+      dict.insert(acc, value.Named(k), value.data_property(v))
+    })
   ObjectSlot(
     kind: OrdinaryObject,
-    properties: dict.map_values(props, fn(_, v) { value.data_property(v) }),
+    properties: keyed,
     symbol_properties: dict.new(),
     elements: elements.new(),
     prototype: None,

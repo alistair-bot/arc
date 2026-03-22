@@ -7,7 +7,7 @@ import arc/vm/ops/object
 import arc/vm/state.{type State, type StepResult, State, Thrown}
 import arc/vm/value.{
   type JsValue, type Ref, ArrayObject, Finite, JsBool, JsNumber, JsObject,
-  JsString, JsUndefined, NativeFunction, ObjectSlot, OrdinaryObject,
+  JsString, JsUndefined, Named, NativeFunction, ObjectSlot, OrdinaryObject,
 }
 import gleam/bool
 import gleam/dict
@@ -732,8 +732,8 @@ fn promise_all_loop(
               )),
             ),
             properties: dict.from_list([
-              #("name", common.fn_name_property("")),
-              #("length", common.fn_length_property(1)),
+              #(Named("name"), common.fn_name_property("")),
+              #(Named("length"), common.fn_length_property(1)),
             ]),
             elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
@@ -938,8 +938,8 @@ fn promise_all_settled_loop(
               )),
             ),
             properties: dict.from_list([
-              #("name", common.fn_name_property("")),
-              #("length", common.fn_length_property(1)),
+              #(Named("name"), common.fn_name_property("")),
+              #(Named("length"), common.fn_length_property(1)),
             ]),
             elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
@@ -962,8 +962,8 @@ fn promise_all_settled_loop(
               )),
             ),
             properties: dict.from_list([
-              #("name", common.fn_name_property("")),
-              #("length", common.fn_length_property(1)),
+              #(Named("name"), common.fn_name_property("")),
+              #(Named("length"), common.fn_length_property(1)),
             ]),
             elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
@@ -1115,8 +1115,8 @@ fn promise_any_loop(
               )),
             ),
             properties: dict.from_list([
-              #("name", common.fn_name_property("")),
-              #("length", common.fn_length_property(1)),
+              #(Named("name"), common.fn_name_property("")),
+              #(Named("length"), common.fn_length_property(1)),
             ]),
             elements: elements.new(),
             prototype: Some(state.builtins.function.prototype),
@@ -1550,8 +1550,8 @@ pub fn make_aggregate_error(
       ObjectSlot(
         kind: OrdinaryObject,
         properties: dict.from_list([
-          #("message", value.builtin_property(JsString(message))),
-          #("errors", value.builtin_property(JsObject(errors_arr_ref))),
+          #(Named("message"), value.builtin_property(JsString(message))),
+          #(Named("errors"), value.builtin_property(JsObject(errors_arr_ref))),
         ]),
         elements: elements.new(),
         prototype: Some(b.aggregate_error.prototype),

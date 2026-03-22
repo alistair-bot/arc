@@ -12,7 +12,7 @@ import arc/vm/state.{type State, State}
 import arc/vm/value.{
   type JsValue, type Ref, type RegExpNativeFn, AccessorProperty, DataProperty,
   Dispatch, Finite, JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined,
-  ObjectSlot, RegExpConstructor, RegExpGetDotAll, RegExpGetFlags,
+  Named, ObjectSlot, RegExpConstructor, RegExpGetDotAll, RegExpGetFlags,
   RegExpGetGlobal, RegExpGetHasIndices, RegExpGetIgnoreCase, RegExpGetMultiline,
   RegExpGetSource, RegExpGetSticky, RegExpGetUnicode, RegExpNative, RegExpObject,
   RegExpPrototypeExec, RegExpPrototypeTest, RegExpPrototypeToString,
@@ -296,7 +296,7 @@ pub fn alloc_regexp(
     h,
     ObjectSlot(
       kind: RegExpObject(pattern:, flags:),
-      properties: dict.from_list([
+      properties: common.named_props([
         #(
           "lastIndex",
           DataProperty(
@@ -361,7 +361,7 @@ fn string_arg(state: State, args: List(JsValue)) -> String {
 fn read_last_index(state: State, ref: Ref) -> Int {
   case heap.read(state.heap, ref) {
     Some(ObjectSlot(properties:, ..)) ->
-      case dict.get(properties, "lastIndex") {
+      case dict.get(properties, Named("lastIndex")) {
         Ok(DataProperty(value: JsNumber(Finite(f)), ..)) ->
           value.float_to_int(f)
         _ -> 0
@@ -380,7 +380,7 @@ fn write_last_index(state: State, ref: Ref, idx: Int) -> State {
             ..slot,
             properties: dict.insert(
               properties,
-              "lastIndex",
+              Named("lastIndex"),
               DataProperty(
                 value: JsNumber(Finite(int.to_float(idx))),
                 writable: True,
@@ -478,12 +478,15 @@ fn regexp_exec(
                 ..slot,
                 properties: props
                   |> dict.insert(
-                    "index",
+                    Named("index"),
                     value.data_property(
                       JsNumber(Finite(int.to_float(match_start))),
                     ),
                   )
-                  |> dict.insert("input", value.data_property(JsString(str))),
+                  |> dict.insert(
+                    Named("input"),
+                    value.data_property(JsString(str)),
+                  ),
               )
             other -> other
           }

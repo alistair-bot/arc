@@ -12,7 +12,7 @@ import arc/vm/ops/object
 import arc/vm/state.{type State, type StepResult, type VmError, State}
 import arc/vm/value.{
   type FuncTemplate, type JsValue, type Ref, DataProperty, JsObject, JsUndefined,
-  ObjectSlot, OrdinaryObject,
+  Named, ObjectSlot, OrdinaryObject,
 }
 import gleam/dict
 import gleam/list
@@ -246,7 +246,7 @@ pub fn eval_script_native(
   // Read the __realm__ property from the $262 object to find the realm
   let realm_result = case this {
     JsObject(this_ref) ->
-      case object.get_own_property(state.heap, this_ref, "__realm__") {
+      case object.get_own_property(state.heap, this_ref, Named("__realm__")) {
         Some(DataProperty(value: JsObject(realm_ref), ..)) ->
           case heap.read(state.heap, realm_ref) {
             Some(value.RealmSlot(
@@ -399,7 +399,12 @@ pub fn create_realm_native(
 
   // Install $262 on the new realm's global object
   let #(h, _) =
-    object.set_property(h, new_global_ref, "$262", JsObject(dollar_262_ref))
+    object.set_property(
+      h,
+      new_global_ref,
+      Named("$262"),
+      JsObject(dollar_262_ref),
+    )
 
   // Register the realm's builtins
   let realms = dict.insert(state.realms, realm_ref, new_builtins)
@@ -445,13 +450,19 @@ pub fn build_262(
       ObjectSlot(
         kind: OrdinaryObject,
         properties: dict.from_list([
-          #("global", value.builtin_property(JsObject(global_ref))),
-          #("evalScript", value.builtin_property(JsObject(eval_script_fn))),
-          #("createRealm", value.builtin_property(JsObject(create_realm_fn))),
-          #("gc", value.builtin_property(JsObject(gc_fn))),
+          #(Named("global"), value.builtin_property(JsObject(global_ref))),
+          #(
+            Named("evalScript"),
+            value.builtin_property(JsObject(eval_script_fn)),
+          ),
+          #(
+            Named("createRealm"),
+            value.builtin_property(JsObject(create_realm_fn)),
+          ),
+          #(Named("gc"), value.builtin_property(JsObject(gc_fn))),
           // __realm__ is non-enumerable internal property
           #(
-            "__realm__",
+            Named("__realm__"),
             value.data(JsObject(realm_ref)) |> value.configurable(),
           ),
         ]),

@@ -319,13 +319,11 @@ pub fn execute_inner(state: State) -> Result(#(Completion, State), VmError) {
   }
 }
 
-/// Wrapper that discards the state for backward compatibility.
-/// Try to find a catch handler on the try_stack.
-/// If found: restore stack to saved depth, push thrown value, jump to catch_target.
-/// If not found: return Error(Nil) → uncaught exception.
+/// Try to find a catch handler for a thrown value. Walks up call_stack when
+/// the current frame's try_stack is exhausted, so throws from a callee can be
+/// caught by a try/catch in the caller.
 fn unwind_to_catch(state: State, thrown_value: JsValue) -> Option(State) {
   case state.try_stack {
-    [] -> None
     [TryFrame(catch_target:, stack_depth:), ..rest_try] -> {
       let restored_stack = truncate_stack(state.stack, stack_depth)
       Some(
@@ -337,6 +335,42 @@ fn unwind_to_catch(state: State, thrown_value: JsValue) -> Option(State) {
         ),
       )
     }
+    [] ->
+      case state.call_stack {
+        [] -> None
+        [
+          SavedFrame(
+            func:,
+            locals:,
+            stack:,
+            pc:,
+            try_stack:,
+            this_binding:,
+            callee_ref:,
+            call_args:,
+            ..,
+          ),
+          ..rest_frames
+        ] ->
+          unwind_to_catch(
+            State(
+              ..state,
+              func:,
+              code: func.bytecode,
+              constants: func.constants,
+              locals:,
+              stack:,
+              pc:,
+              try_stack:,
+              this_binding:,
+              callee_ref:,
+              call_args:,
+              call_stack: rest_frames,
+              call_depth: state.call_depth - 1,
+            ),
+            thrown_value,
+          )
+      }
   }
 }
 

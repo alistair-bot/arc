@@ -2745,12 +2745,14 @@ fn step_iteration(
                 }
               }
             }
+            // Generic iterator: any object with .next(). Call it, extract {value, done}.
+            Some(ObjectSlot(..)) -> step_generic_iterator(state, iter_ref, rest)
             _ ->
-              Error(#(
-                StepVmError(Unimplemented("IteratorNext: not an iterator")),
-                JsUndefined,
-                state.heap,
-              ))
+              state.throw_type_error(
+                state,
+                object.inspect(JsObject(iter_ref), state.heap)
+                  <> " is not an iterator",
+              )
           }
         _ ->
           Error(#(
@@ -3190,6 +3192,38 @@ fn alloc_array_iterator(
       extensible: True,
     ),
   )
+}
+
+/// IteratorNext fallback for user-defined iterators: call .next(), extract
+/// {value, done}, push [done, value, iter] onto stack.
+fn step_generic_iterator(
+  state: State,
+  iter_ref: Ref,
+  rest: List(JsValue),
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  let iter = JsObject(iter_ref)
+  use #(next_fn, state) <- result.try(
+    state.rethrow(object.get_value(state, iter_ref, Named("next"), iter)),
+  )
+  use #(result_obj, state) <- result.try(
+    state.rethrow(state.call(state, next_fn, iter, [])),
+  )
+  case result_obj {
+    JsObject(rref) -> {
+      use #(done_v, state) <- result.try(
+        state.rethrow(object.get_value(state, rref, Named("done"), result_obj)),
+      )
+      use #(val, state) <- result.map(
+        state.rethrow(object.get_value(state, rref, Named("value"), result_obj)),
+      )
+      State(
+        ..state,
+        stack: [JsBool(value.is_truthy(done_v)), val, iter, ..rest],
+        pc: state.pc + 1,
+      )
+    }
+    _ -> state.throw_type_error(state, "Iterator result is not an object")
+  }
 }
 
 /// ES2024 §7.4.1 GetIterator(obj, kind) — look up Symbol.iterator and call it.

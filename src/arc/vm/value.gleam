@@ -880,17 +880,11 @@ pub fn builtin_property(val: JsValue) -> Property {
 fn refs_in_property(prop: Property) -> List(Ref) {
   case prop {
     DataProperty(value:, ..) -> refs_in_value(value)
-    AccessorProperty(get:, set:, ..) -> {
-      let g = case get {
-        Some(v) -> refs_in_value(v)
-        None -> []
-      }
-      let s = case set {
-        Some(v) -> refs_in_value(v)
-        None -> []
-      }
-      list.append(g, s)
-    }
+    AccessorProperty(get:, set:, ..) ->
+      list.append(
+        get |> option.map(refs_in_value) |> option.unwrap([]),
+        set |> option.map(refs_in_value) |> option.unwrap([]),
+      )
   }
 }
 
@@ -1176,10 +1170,7 @@ pub fn refs_in_slot(slot: HeapSlot) -> List(Ref) {
         SparseElements(data) ->
           dict.values(data) |> list.flat_map(refs_in_value)
       }
-      let proto_refs = case prototype {
-        Some(ref) -> [ref]
-        None -> []
-      }
+      let proto_refs = prototype |> option.map(list.wrap) |> option.unwrap([])
       let kind_refs = case kind {
         FunctionObject(env: env_ref, func_template: _) -> [env_ref]
         NativeFunction(Dispatch(ErrorNative(ErrorConstructor(proto: ref)))) -> [
@@ -1438,17 +1429,15 @@ pub fn abstract_equal(left: JsValue, right: JsValue) -> Bool {
     -> strict_equal(left, right)
     // Number vs String — coerce string to number
     JsNumber(_), JsString(s) ->
-      case to_number(JsString(s)) {
-        Ok(n) -> strict_equal(left, JsNumber(n))
-        Error(_) -> False
-      }
+      to_number(JsString(s))
+      |> result.map(fn(n) { strict_equal(left, JsNumber(n)) })
+      |> result.unwrap(False)
     JsString(_), JsNumber(_) -> abstract_equal(right, left)
     // Bool vs anything — coerce bool to number
     JsBool(_), _ ->
-      case to_number(left) {
-        Ok(n) -> abstract_equal(JsNumber(n), right)
-        Error(_) -> False
-      }
+      to_number(left)
+      |> result.map(fn(n) { abstract_equal(JsNumber(n), right) })
+      |> result.unwrap(False)
     _, JsBool(_) -> abstract_equal(right, left)
     _, _ -> False
   }
@@ -1463,14 +1452,11 @@ pub fn to_number(val: JsValue) -> Result(JsNum, String) {
     JsBool(False) -> Ok(Finite(0.0))
     JsString("") -> Ok(Finite(0.0))
     JsString(s) ->
-      case float.parse(s) {
-        Ok(n) -> Ok(Finite(n))
-        Error(_) ->
-          case int.parse(s) {
-            Ok(n) -> Ok(Finite(int.to_float(n)))
-            Error(_) -> Ok(NaN)
-          }
-      }
+      float.parse(s)
+      |> result.or(int.parse(s) |> result.map(int.to_float))
+      |> result.map(Finite)
+      |> result.unwrap(NaN)
+      |> Ok
     JsBigInt(_) -> Error("Cannot convert BigInt to number")
     JsSymbol(_) -> Error("Cannot convert Symbol to number")
     JsObject(_) -> Ok(NaN)

@@ -24,6 +24,7 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{None, Some}
+import gleam/result
 import gleam/string
 
 // ============================================================================
@@ -550,24 +551,23 @@ fn for_each_loop(
           )
         Ok(val) -> {
           // Get original JS key value for the callback
-          let original_key = case dict.get(original_keys, map_key) {
-            Ok(k) -> k
-            Error(Nil) -> JsUndefined
-          }
+          let original_key =
+            dict.get(original_keys, map_key) |> result.unwrap(JsUndefined)
           // Step 5a.i: Call(callbackfn, thisArg, « e.[[Value]], e.[[Key]], M »)
-          case frame.call(state, cb, this_arg, [val, original_key, map_this]) {
-            Error(#(thrown, state)) -> #(state, Error(thrown))
-            Ok(#(_result, state)) ->
-              for_each_loop(
-                state,
-                data,
-                rest,
-                original_keys,
-                cb,
-                this_arg,
-                map_this,
-              )
-          }
+          use _result, state <- frame.try_call(state, cb, this_arg, [
+            val,
+            original_key,
+            map_this,
+          ])
+          for_each_loop(
+            state,
+            data,
+            rest,
+            original_keys,
+            cb,
+            this_arg,
+            map_this,
+          )
         }
       }
     }

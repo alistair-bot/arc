@@ -263,10 +263,7 @@ fn dict_get_option(
   d: dict.Dict(String, Property),
   key: String,
 ) -> Option(Property) {
-  case dict.get(d, key) {
-    Ok(prop) -> Some(prop)
-    Error(_) -> None
-  }
+  dict.get(d, key) |> option.from_result
 }
 
 /// §10.1.9.1 OrdinarySet ( O, P, V, Receiver )
@@ -446,10 +443,9 @@ pub fn set_property(
           let is_guarded = case key {
             "length" -> True
             _ ->
-              case int.parse(key) {
-                Ok(idx) -> idx >= 0 && idx < len
-                Error(_) -> False
-              }
+              int.parse(key)
+              |> result.map(fn(idx) { idx >= 0 && idx < len })
+              |> result.unwrap(False)
           }
           case is_guarded {
             // §10.4.3.2: Reject — property is immutable on String exotic.
@@ -1299,10 +1295,7 @@ fn inspect_inner(
     value.JsNumber(value.NegInfinity) -> "-Infinity"
     value.JsString(s) -> "'" <> s <> "'"
     value.JsSymbol(id) ->
-      case value.well_known_symbol_description(id) {
-        option.Some(desc) -> desc
-        option.None -> "Symbol()"
-      }
+      value.well_known_symbol_description(id) |> option.unwrap("Symbol()")
     value.JsBigInt(value.BigInt(n)) -> int.to_string(n) <> "n"
     value.JsUninitialized -> "<uninitialized>"
     value.JsObject(value.Ref(id:) as ref) ->
@@ -1411,10 +1404,10 @@ fn inspect_array_loop(
   case idx >= length {
     True -> list.reverse(acc)
     False -> {
-      let item = case js_elements.get_option(elements, idx) {
-        Some(val) -> inspect_inner(val, heap, depth + 1, visited)
-        None -> "<empty>"
-      }
+      let item =
+        js_elements.get_option(elements, idx)
+        |> option.map(inspect_inner(_, heap, depth + 1, visited))
+        |> option.unwrap("<empty>")
       inspect_array_loop(heap, elements, idx + 1, length, depth, visited, [
         item,
         ..acc

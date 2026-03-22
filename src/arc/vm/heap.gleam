@@ -79,10 +79,7 @@ pub fn reserve(heap: Heap) -> #(Heap, Ref) {
 /// or already collected). Uses Option rather than Result since a missing
 /// ref is a normal condition (e.g. prototype chain termination), not an error.
 pub fn read(heap: Heap, ref: Ref) -> Option(HeapSlot) {
-  case dict.get(heap.data, ref.id) {
-    Ok(slot) -> Some(slot)
-    Error(Nil) -> None
-  }
+  dict.get(heap.data, ref.id) |> option.from_result
 }
 
 /// Overwrite a slot. No-op if the ref doesn't exist in the heap

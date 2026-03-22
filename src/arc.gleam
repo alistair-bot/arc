@@ -60,10 +60,9 @@ fn inspect_inner(
     value.JsNumber(value.NegInfinity) -> "-Infinity"
     value.JsString(s) -> "'" <> escape_string(s) <> "'"
     value.JsSymbol(sym_id) ->
-      case value.well_known_symbol_description(sym_id) {
-        Some(desc) -> "Symbol(" <> desc <> ")"
-        None -> "Symbol()"
-      }
+      value.well_known_symbol_description(sym_id)
+      |> option.map(fn(desc) { "Symbol(" <> desc <> ")" })
+      |> option.unwrap("Symbol()")
     value.JsBigInt(value.BigInt(n)) -> int.to_string(n) <> "n"
     value.JsUninitialized -> "undefined"
     value.JsObject(ref) -> inspect_object(h, ref, depth, seen)
@@ -159,10 +158,10 @@ fn inspect_array(
     False -> {
       let items =
         int.range(from: 0, to: length, with: [], run: fn(acc, i) {
-          let s = case js_elements.get_option(elements, i) {
-            Some(v) -> inspect_inner(h, v, depth + 1, seen)
-            None -> "<empty>"
-          }
+          let s =
+            js_elements.get_option(elements, i)
+            |> option.map(inspect_inner(h, _, depth + 1, seen))
+            |> option.unwrap("<empty>")
           list.append(acc, [s])
         })
       "[ " <> string.join(items, ", ") <> " ]"
@@ -189,14 +188,11 @@ fn inspect_tagged_object(
   depth: Int,
   seen: set.Set(Int),
 ) -> String {
-  let tag = case dict.get(symbol_properties, value.symbol_to_string_tag) {
-    Ok(DataProperty(value: value.JsString(t), ..)) -> Some(t)
-    _ -> None
-  }
   let body = inspect_plain_object(h, properties, depth, seen)
-  case tag {
-    Some(t) -> "Object [" <> t <> "] " <> body
-    None -> body
+  case dict.get(symbol_properties, value.symbol_to_string_tag) {
+    Ok(DataProperty(value: value.JsString(t), ..)) ->
+      "Object [" <> t <> "] " <> body
+    _ -> body
   }
 }
 

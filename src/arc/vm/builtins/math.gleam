@@ -17,6 +17,7 @@ import gleam/float
 import gleam/int
 import gleam/list
 import gleam/option.{Some}
+import gleam/result
 
 /// Set up the Math global object.
 /// Math is NOT a constructor — it's a plain object with static methods.
@@ -673,14 +674,10 @@ pub fn to_number(val: JsValue) -> value.JsNum {
     JsString("Infinity") -> Infinity
     JsString("-Infinity") -> NegInfinity
     JsString(s) ->
-      case float.parse(s) {
-        Ok(n) -> Finite(n)
-        Error(Nil) ->
-          case int.parse(s) {
-            Ok(n) -> Finite(int.to_float(n))
-            Error(Nil) -> NaN
-          }
-      }
+      float.parse(s)
+      |> result.try_recover(fn(_) { int.parse(s) |> result.map(int.to_float) })
+      |> result.map(Finite)
+      |> result.unwrap(NaN)
     _ -> NaN
   }
 }

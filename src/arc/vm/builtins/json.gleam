@@ -94,11 +94,7 @@ fn json_parse(
   // Step 1: ToString(text)
   let to_string_result = case args {
     [JsString(s), ..] -> Ok(#(s, state))
-    [other, ..] ->
-      case frame.to_string(state, other) {
-        Ok(#(s, new_state)) -> Ok(#(s, new_state))
-        Error(#(thrown, new_state)) -> Error(#(thrown, new_state))
-      }
+    [other, ..] -> frame.to_string(state, other)
     [] -> Ok(#("undefined", state))
   }
 
@@ -238,67 +234,8 @@ fn parse_string_content(
         ["t", ..rest2] ->
           parse_string_content(rest2, string_tree.append(acc, "\t"))
         ["u", ..rest2] -> {
-          case parse_unicode_escape(rest2) {
-            Ok(#(codepoint_val, rest3)) -> {
-              // Check for surrogate pair
-              case codepoint_val >= 0xD800 && codepoint_val <= 0xDBFF {
-                True -> {
-                  // High surrogate — look for \uXXXX low surrogate
-                  case rest3 {
-                    ["\\", "u", ..rest4] ->
-                      case parse_unicode_escape(rest4) {
-                        Ok(#(low, rest5)) if low >= 0xDC00 && low <= 0xDFFF -> {
-                          // Combine surrogate pair
-                          let combined =
-                            { codepoint_val - 0xD800 }
-                            * 0x400
-                            + { low - 0xDC00 }
-                            + 0x10000
-                          case string.utf_codepoint(combined) {
-                            Ok(cp) ->
-                              parse_string_content(
-                                rest5,
-                                string_tree.append(
-                                  acc,
-                                  string.from_utf_codepoints([cp]),
-                                ),
-                              )
-                            Error(Nil) ->
-                              Error("Invalid Unicode codepoint in JSON string")
-                          }
-                        }
-                        _ ->
-                          // Not a valid low surrogate; emit replacement char
-                          parse_string_content(
-                            rest3,
-                            string_tree.append(acc, "\u{FFFD}"),
-                          )
-                      }
-                    _ ->
-                      // Lone high surrogate, emit replacement char
-                      parse_string_content(
-                        rest3,
-                        string_tree.append(acc, "\u{FFFD}"),
-                      )
-                  }
-                }
-                False ->
-                  case string.utf_codepoint(codepoint_val) {
-                    Ok(cp) ->
-                      parse_string_content(
-                        rest3,
-                        string_tree.append(
-                          acc,
-                          string.from_utf_codepoints([cp]),
-                        ),
-                      )
-                    Error(Nil) ->
-                      Error("Invalid Unicode codepoint in JSON string")
-                  }
-              }
-            }
-            Error(msg) -> Error(msg)
-          }
+          use #(decoded, rest) <- result.try(decode_unicode_escape(rest2))
+          parse_string_content(rest, string_tree.append(acc, decoded))
         }
         [c, ..] -> Error("Invalid escape character '\\" <> c <> "' in JSON")
       }
@@ -322,6 +259,47 @@ fn parse_unicode_escape(
     }
     _ -> Error("Unexpected end of Unicode escape in JSON")
   }
+}
+
+/// Decode a \uXXXX escape (possibly a surrogate pair) into a UTF-8 string.
+/// Returns #(decoded_string, remaining_chars). Lone surrogates become U+FFFD.
+fn decode_unicode_escape(
+  chars: List(String),
+) -> Result(#(String, List(String)), String) {
+  use #(high, rest) <- result.try(parse_unicode_escape(chars))
+  case high >= 0xD800 && high <= 0xDBFF {
+    // High surrogate — look for a trailing \uXXXX low surrogate
+    True ->
+      case parse_low_surrogate(rest) {
+        Some(#(low, rest)) -> {
+          let combined = { high - 0xD800 } * 0x400 + { low - 0xDC00 } + 0x10000
+          codepoint_to_string(combined) |> result.map(fn(s) { #(s, rest) })
+        }
+        // Lone/unpaired high surrogate → U+FFFD replacement char
+        None -> Ok(#("\u{FFFD}", rest))
+      }
+    False -> codepoint_to_string(high) |> result.map(fn(s) { #(s, rest) })
+  }
+}
+
+/// Try to consume "\uXXXX" where XXXX is a low surrogate (DC00-DFFF).
+/// Returns None if not present or not a valid low surrogate (caller rewinds).
+fn parse_low_surrogate(chars: List(String)) -> Option(#(Int, List(String))) {
+  case chars {
+    ["\\", "u", ..rest] ->
+      case parse_unicode_escape(rest) {
+        Ok(#(low, rest)) if low >= 0xDC00 && low <= 0xDFFF -> Some(#(low, rest))
+        _ -> None
+      }
+    _ -> None
+  }
+}
+
+/// Convert an integer codepoint into a single-char string, or error.
+fn codepoint_to_string(codepoint: Int) -> Result(String, String) {
+  string.utf_codepoint(codepoint)
+  |> result.map(fn(cp) { string.from_utf_codepoints([cp]) })
+  |> result.replace_error("Invalid Unicode codepoint in JSON string")
 }
 
 /// Parse a JSON number.
@@ -375,16 +353,9 @@ fn is_number_char(c: String) -> Bool {
 
 /// Parse a collected number string into a Float.
 fn parse_json_number_string(s: String) -> Result(Float, Nil) {
-  // Try parsing as float first
-  case gleam_stdlib_parse_float(s) {
-    Ok(f) -> Ok(f)
-    Error(Nil) ->
-      // Try parsing as integer and converting to float
-      case int.parse(s) {
-        Ok(n) -> Ok(int.to_float(n))
-        Error(Nil) -> Error(Nil)
-      }
-  }
+  // Try parsing as float first, then fall back to int parse → to_float
+  gleam_stdlib_parse_float(s)
+  |> result.try_recover(fn(_) { int.parse(s) |> result.map(int.to_float) })
 }
 
 @external(erlang, "gleam_stdlib", "parse_float")
@@ -409,15 +380,9 @@ fn parse_array(
             _ -> Error("Expected ',' or ']' in array")
           }
       }
-      case chars {
-        Error(msg) -> Error(msg)
-        Ok(chars) -> {
-          case parse_value(chars) {
-            Ok(#(val, rest)) -> parse_array(rest, [val, ..acc])
-            Error(msg) -> Error(msg)
-          }
-        }
-      }
+      use chars <- result.try(chars)
+      use #(val, rest) <- result.try(parse_value(chars))
+      parse_array(rest, [val, ..acc])
     }
   }
 }
@@ -441,34 +406,22 @@ fn parse_object(
             _ -> Error("Expected ',' or '}' in object")
           }
       }
-      case chars {
-        Error(msg) -> Error(msg)
-        Ok(chars) -> {
-          // Parse key (must be a string)
-          let chars = skip_whitespace(chars)
-          case chars {
-            ["\"", ..rest] -> {
-              case parse_string_content(rest, string_tree.new()) {
-                Ok(#(key, rest)) -> {
-                  let rest = skip_whitespace(rest)
-                  case rest {
-                    [":", ..rest] -> {
-                      case parse_value(rest) {
-                        Ok(#(val, rest)) ->
-                          parse_object(rest, [#(key, val), ..acc])
-                        Error(msg) -> Error(msg)
-                      }
-                    }
-                    _ -> Error("Expected ':' after key in object")
-                  }
-                }
-                Error(msg) -> Error(msg)
-              }
-            }
-            _ -> Error("Expected string key in object")
-          }
-        }
-      }
+      use chars <- result.try(chars)
+      // Parse key (must be a string)
+      use rest <- result.try(case skip_whitespace(chars) {
+        ["\"", ..rest] -> Ok(rest)
+        _ -> Error("Expected string key in object")
+      })
+      use #(key, rest) <- result.try(parse_string_content(
+        rest,
+        string_tree.new(),
+      ))
+      use rest <- result.try(case skip_whitespace(rest) {
+        [":", ..rest] -> Ok(rest)
+        _ -> Error("Expected ':' after key in object")
+      })
+      use #(val, rest) <- result.try(parse_value(rest))
+      parse_object(rest, [#(key, val), ..acc])
     }
   }
 }

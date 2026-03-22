@@ -2174,10 +2174,8 @@ fn step_calls(
             list.map(child_template.env_descriptors, fn(desc) {
               case desc {
                 value.CaptureLocal(parent_index) ->
-                  case array.get(parent_index, state.locals) {
-                    Some(val) -> val
-                    None -> JsUndefined
-                  }
+                  array.get(parent_index, state.locals)
+                  |> option.unwrap(JsUndefined)
                 value.CaptureEnv(_parent_env_index) ->
                   // Transitive capture not yet implemented
                   JsUndefined
@@ -2188,19 +2186,13 @@ fn step_calls(
           // For non-arrow functions, pre-populate .prototype with a fresh object
           // so that `Foo.prototype.bar = ...` and `new Foo()` work.
           // .constructor on prototype is set after we have the closure ref.
+          let name_prop =
+            common.fn_name_property(option.unwrap(child_template.name, ""))
+          let length_prop = common.fn_length_property(child_template.arity)
           let #(heap, fn_properties, proto_ref) = case child_template.is_arrow {
             True -> #(
               heap,
-              dict.from_list([
-                #(
-                  "name",
-                  common.fn_name_property(case child_template.name {
-                    Some(n) -> n
-                    None -> ""
-                  }),
-                ),
-                #("length", common.fn_length_property(child_template.arity)),
-              ]),
+              dict.from_list([#("name", name_prop), #("length", length_prop)]),
               None,
             )
             False -> {
@@ -2223,14 +2215,8 @@ fn step_calls(
                     "prototype",
                     value.data(JsObject(proto_obj_ref)) |> value.writable(),
                   ),
-                  #(
-                    "name",
-                    common.fn_name_property(case child_template.name {
-                      Some(n) -> n
-                      None -> ""
-                    }),
-                  ),
-                  #("length", common.fn_length_property(child_template.arity)),
+                  #("name", name_prop),
+                  #("length", length_prop),
                 ]),
                 Some(proto_obj_ref),
               )
@@ -2661,10 +2647,8 @@ fn step_special(
       // Allocate an unmapped arguments object from state.call_args.
       let args = state.call_args
       let length = list.length(args)
-      let callee = case state.callee_ref {
-        Some(r) -> JsObject(r)
-        None -> JsUndefined
-      }
+      let callee =
+        state.callee_ref |> option.map(JsObject) |> option.unwrap(JsUndefined)
       let props =
         dict.from_list([
           #(

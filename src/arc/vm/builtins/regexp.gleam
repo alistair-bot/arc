@@ -17,10 +17,11 @@ import arc/vm/value.{
   RegExpPrototypeExec, RegExpPrototypeTest, RegExpPrototypeToString,
   RegExpSymbolMatch, RegExpSymbolReplace, RegExpSymbolSearch, RegExpSymbolSplit,
 }
+import gleam/bool
 import gleam/dict
 import gleam/int
 import gleam/list
-import gleam/option.{None, Some}
+import gleam/option.{type Option, None, Some}
 import gleam/string
 
 /// Max string size in bytes before we throw "Invalid string length".
@@ -751,64 +752,58 @@ fn apply_replacements(
               match.captures,
               [JsNumber(Finite(int.to_float(match.position))), JsString(str)],
             ])
-          case frame.call(state, replace_value, JsUndefined, call_args) {
-            Ok(#(result, state)) ->
-              case frame.to_string(state, result) {
-                Ok(#(replacement, state)) -> {
-                  let acc = acc <> replacement
-                  let prev_end = match.position + string.length(match.matched)
-                  apply_replacements(
-                    str,
-                    rest,
-                    replace_value,
-                    functional_replace,
-                    state,
-                    prev_end,
-                    acc,
-                  )
-                }
-                Error(#(thrown, state)) -> #(state, Error(thrown))
-              }
-            Error(#(thrown, state)) -> #(state, Error(thrown))
-          }
+          use result, state <- frame.try_call(
+            state,
+            replace_value,
+            JsUndefined,
+            call_args,
+          )
+          use replacement, state <- frame.try_to_string(state, result)
+          let acc = acc <> replacement
+          let prev_end = match.position + string.length(match.matched)
+          apply_replacements(
+            str,
+            rest,
+            replace_value,
+            functional_replace,
+            state,
+            prev_end,
+            acc,
+          )
         }
         False -> {
-          case frame.to_string(state, replace_value) {
-            Ok(#(template, state)) -> {
-              case
-                get_substitution(
-                  match.matched,
-                  str,
-                  match.position,
-                  match.captures,
-                  template,
+          use template, state <- frame.try_to_string(state, replace_value)
+          case
+            get_substitution(
+              match.matched,
+              str,
+              match.position,
+              match.captures,
+              template,
+            )
+          {
+            Error(Nil) -> {
+              let #(heap, err) =
+                common.make_range_error(
+                  state.heap,
+                  state.builtins,
+                  "Invalid string length",
                 )
-              {
-                Error(Nil) -> {
-                  let #(heap, err) =
-                    common.make_range_error(
-                      state.heap,
-                      state.builtins,
-                      "Invalid string length",
-                    )
-                  #(State(..state, heap:), Error(err))
-                }
-                Ok(replacement) -> {
-                  let acc = acc <> replacement
-                  let prev_end = match.position + string.length(match.matched)
-                  apply_replacements(
-                    str,
-                    rest,
-                    replace_value,
-                    functional_replace,
-                    state,
-                    prev_end,
-                    acc,
-                  )
-                }
-              }
+              #(State(..state, heap:), Error(err))
             }
-            Error(#(thrown, state)) -> #(state, Error(thrown))
+            Ok(replacement) -> {
+              let acc = acc <> replacement
+              let prev_end = match.position + string.length(match.matched)
+              apply_replacements(
+                str,
+                rest,
+                replace_value,
+                functional_replace,
+                state,
+                prev_end,
+                acc,
+              )
+            }
           }
         }
       }
@@ -897,43 +892,17 @@ fn estimate_substitution_length(
       )
     }
     ["$", d1, d2, ..rest] ->
-      case is_digit(d1) && is_digit(d2) {
-        True ->
-          case int.parse(d1 <> d2) {
-            Ok(idx) if idx >= 1 ->
-              case helpers.list_at(captures, idx - 1) {
-                Some(JsString(s)) ->
-                  estimate_substitution_length(
-                    matched,
-                    str,
-                    position,
-                    captures,
-                    rest,
-                    acc + string.byte_size(s),
-                  )
-                _ ->
-                  estimate_single_digit_len(
-                    matched,
-                    str,
-                    position,
-                    captures,
-                    d1,
-                    [d2, ..rest],
-                    acc,
-                  )
-              }
-            _ ->
-              estimate_single_digit_len(
-                matched,
-                str,
-                position,
-                captures,
-                d1,
-                [d2, ..rest],
-                acc,
-              )
-          }
-        False ->
+      case two_digit_capture(captures, d1, d2) {
+        Some(s) ->
+          estimate_substitution_length(
+            matched,
+            str,
+            position,
+            captures,
+            rest,
+            acc + string.byte_size(s),
+          )
+        None ->
           estimate_single_digit_len(
             matched,
             str,
@@ -1059,46 +1028,18 @@ fn get_substitution_loop(
         acc <> after,
       )
     }
-    ["$", d1, d2, ..rest] -> {
-      case is_digit(d1) && is_digit(d2) {
-        True -> {
-          let idx_str = d1 <> d2
-          case int.parse(idx_str) {
-            Ok(idx) if idx >= 1 ->
-              case helpers.list_at(captures, idx - 1) {
-                Some(JsString(s)) ->
-                  get_substitution_loop(
-                    matched,
-                    str,
-                    position,
-                    captures,
-                    rest,
-                    acc <> s,
-                  )
-                _ ->
-                  try_single_digit_ref(
-                    matched,
-                    str,
-                    position,
-                    captures,
-                    d1,
-                    [d2, ..rest],
-                    acc,
-                  )
-              }
-            _ ->
-              try_single_digit_ref(
-                matched,
-                str,
-                position,
-                captures,
-                d1,
-                [d2, ..rest],
-                acc,
-              )
-          }
-        }
-        False ->
+    ["$", d1, d2, ..rest] ->
+      case two_digit_capture(captures, d1, d2) {
+        Some(s) ->
+          get_substitution_loop(
+            matched,
+            str,
+            position,
+            captures,
+            rest,
+            acc <> s,
+          )
+        None ->
           try_single_digit_ref(
             matched,
             str,
@@ -1109,7 +1050,6 @@ fn get_substitution_loop(
             acc,
           )
       }
-    }
     ["$", d1] ->
       try_single_digit_ref(matched, str, position, captures, d1, [], acc)
     [ch, ..rest] ->
@@ -1165,6 +1105,29 @@ fn try_single_digit_ref(
         [d1, ..rest],
         acc <> "$",
       )
+  }
+}
+
+/// Look up a two-digit capture group $NN in the captures list. Returns
+/// Some(captured_string) if d1 and d2 are digits, the index is >= 1, and
+/// captures[idx-1] is a JsString. None → caller falls back to single-digit.
+fn two_digit_capture(
+  captures: List(JsValue),
+  d1: String,
+  d2: String,
+) -> Option(String) {
+  use <- bool.guard(!is_digit(d1) || !is_digit(d2), None)
+  int.parse(d1 <> d2)
+  |> option.from_result
+  |> option.then(capture_string(captures, _))
+}
+
+/// Look up captures[idx-1] as a string. None if out of range, <1, or not a string.
+fn capture_string(captures: List(JsValue), idx: Int) -> Option(String) {
+  use <- bool.guard(idx < 1, None)
+  case helpers.list_at(captures, idx - 1) {
+    Some(JsString(s)) -> Some(s)
+    _ -> None
   }
 }
 

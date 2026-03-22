@@ -290,22 +290,22 @@ pub fn parse_float(
   }
   case str_result {
     Error(#(thrown, state)) -> #(state, Error(thrown))
-    Ok(#(str, state)) ->
-      // Steps 3-6: Parse as StrDecimalLiteral.
-      // Handle "Infinity"/"+Infinity"/"-Infinity" specially.
-      case str {
-        "Infinity" | "+Infinity" -> #(state, Ok(JsNumber(Infinity)))
-        "-Infinity" -> #(state, Ok(JsNumber(NegInfinity)))
-        _ ->
-          case gleam_stdlib_parse_float(str) {
-            Ok(n) -> #(state, Ok(JsNumber(Finite(n))))
-            Error(_) ->
-              case int.parse(str) {
-                Ok(n) -> #(state, Ok(JsNumber(Finite(int.to_float(n)))))
-                Error(_) -> #(state, Ok(JsNumber(NaN)))
-              }
-          }
-      }
+    // Steps 3-6: Parse as StrDecimalLiteral.
+    Ok(#(str, state)) -> #(state, Ok(JsNumber(parse_decimal_string(str))))
+  }
+}
+
+/// Parse a trimmed string as a StrDecimalLiteral. Handles Infinity literals,
+/// then tries float parse, then int parse, defaulting to NaN.
+fn parse_decimal_string(str: String) -> JsNum {
+  case str {
+    "Infinity" | "+Infinity" -> Infinity
+    "-Infinity" -> NegInfinity
+    _ ->
+      gleam_stdlib_parse_float(str)
+      |> result.try_recover(fn(_) { int.parse(str) |> result.map(int.to_float) })
+      |> result.map(Finite)
+      |> result.unwrap(NaN)
   }
 }
 

@@ -610,12 +610,7 @@ fn emit_stmt_tail(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError)
       let e = emit_ir(e, IrJump(end_label))
       let e = emit_ir(e, IrLabel(else_label))
       let e = case alternate {
-        Some(alt) -> {
-          case emit_stmt_tail(e, alt) {
-            Ok(e) -> e
-            Error(_) -> e
-          }
-        }
+        Some(alt) -> emit_stmt_tail(e, alt) |> result.unwrap(e)
         None -> push_const(e, JsUndefined)
       }
       let e = emit_ir(e, IrLabel(end_label))
@@ -637,12 +632,9 @@ fn emit_stmt_tail(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError)
           let e = emit_op(e, EnterScope(BlockScope))
 
           let e = case param {
-            Some(pattern) -> {
-              case emit_destructuring_bind(e, pattern, CatchBinding) {
-                Ok(e) -> e
-                Error(_) -> e
-              }
-            }
+            Some(pattern) ->
+              emit_destructuring_bind(e, pattern, CatchBinding)
+              |> result.unwrap(e)
             None -> emit_ir(e, IrPop)
           }
 
@@ -695,10 +687,7 @@ fn collect_pattern_names(pattern: ast.Pattern) -> List(String) {
     ast.IdentifierPattern(name) -> [name]
     ast.ArrayPattern(elements) ->
       list.flat_map(elements, fn(elem) {
-        case elem {
-          Some(p) -> collect_pattern_names(p)
-          None -> []
-        }
+        elem |> option.map(collect_pattern_names) |> option.unwrap([])
       })
     ast.ObjectPattern(properties) ->
       list.flat_map(properties, fn(prop) {
@@ -721,14 +710,11 @@ fn collect_vars_stmt(stmt: ast.Statement) -> List(String) {
         }
       })
     ast.BlockStatement(body) -> list.flat_map(body, collect_vars_stmt)
-    ast.IfStatement(_, consequent, alternate) -> {
-      let then_vars = collect_vars_stmt(consequent)
-      let else_vars = case alternate {
-        Some(alt) -> collect_vars_stmt(alt)
-        None -> []
-      }
-      list.append(then_vars, else_vars)
-    }
+    ast.IfStatement(_, consequent, alternate) ->
+      list.append(
+        collect_vars_stmt(consequent),
+        alternate |> option.map(collect_vars_stmt) |> option.unwrap([]),
+      )
     ast.WhileStatement(_, body) -> collect_vars_stmt(body)
     ast.DoWhileStatement(_, body) -> collect_vars_stmt(body)
     ast.ForStatement(init, _, _, body) -> {
@@ -910,10 +896,9 @@ fn stmt_references_arguments(stmt: ast.Statement) -> Bool {
 
     ast.TryStatement(block, handler, finalizer) ->
       stmt_references_arguments(block)
-      || case handler {
-        Some(ast.CatchClause(_, body)) -> stmt_references_arguments(body)
-        None -> False
-      }
+      || handler
+      |> option.map(fn(h) { stmt_references_arguments(h.body) })
+      |> option.unwrap(False)
       || opt_stmt_references_arguments(finalizer)
 
     ast.LabeledStatement(_, body) -> stmt_references_arguments(body)
@@ -988,13 +973,7 @@ fn expr_references_arguments(expr: ast.Expression) -> Bool {
       || expr_references_arguments(t)
       || expr_references_arguments(a)
 
-    ast.ArrayExpression(elems) ->
-      list.any(elems, fn(e) {
-        case e {
-          Some(ex) -> expr_references_arguments(ex)
-          None -> False
-        }
-      })
+    ast.ArrayExpression(elems) -> list.any(elems, opt_expr_references_arguments)
 
     ast.ObjectExpression(props) ->
       list.any(props, fn(p) {
@@ -1038,17 +1017,11 @@ fn expr_references_arguments(expr: ast.Expression) -> Bool {
 }
 
 fn opt_expr_references_arguments(e: Option(ast.Expression)) -> Bool {
-  case e {
-    Some(ex) -> expr_references_arguments(ex)
-    None -> False
-  }
+  e |> option.map(expr_references_arguments) |> option.unwrap(False)
 }
 
 fn opt_stmt_references_arguments(s: Option(ast.Statement)) -> Bool {
-  case s {
-    Some(stmt) -> stmt_references_arguments(stmt)
-    None -> False
-  }
+  s |> option.map(stmt_references_arguments) |> option.unwrap(False)
 }
 
 fn for_init_references_arguments(init: ast.ForInit) -> Bool {
@@ -1060,10 +1033,7 @@ fn for_init_references_arguments(init: ast.ForInit) -> Bool {
 }
 
 fn opt_for_init_references_arguments(init: Option(ast.ForInit)) -> Bool {
-  case init {
-    Some(i) -> for_init_references_arguments(i)
-    None -> False
-  }
+  init |> option.map(for_init_references_arguments) |> option.unwrap(False)
 }
 
 fn pattern_references_arguments(p: ast.Pattern) -> Bool {
@@ -1076,10 +1046,7 @@ fn pattern_references_arguments(p: ast.Pattern) -> Bool {
       pattern_references_arguments(left) || expr_references_arguments(right)
     ast.ArrayPattern(elems) ->
       list.any(elems, fn(e) {
-        case e {
-          Some(pat) -> pattern_references_arguments(pat)
-          None -> False
-        }
+        e |> option.map(pattern_references_arguments) |> option.unwrap(False)
       })
     ast.ObjectPattern(props) ->
       list.any(props, fn(prop) {
@@ -1197,10 +1164,7 @@ fn compile_function_body(
     list.fold(destructured_params, e, fn(e, dp) {
       let #(synthetic, pattern) = dp
       let e = emit_ir(e, IrScopeGetVar(synthetic))
-      case emit_destructuring_bind(e, pattern, LetBinding) {
-        Ok(e) -> e
-        Error(_) -> e
-      }
+      emit_destructuring_bind(e, pattern, LetBinding) |> result.unwrap(e)
     })
 
   // Hoisting for the function body
@@ -1240,12 +1204,8 @@ fn compile_function_body(
     False -> e
   }
 
-  // Emit body statements
-  let e = case emit_stmts(e, stmts) {
-    Ok(e) -> e
-    Error(_) -> e
-    // For MVP, compilation errors in function bodies are ignored
-  }
+  // Emit body statements (for MVP, compilation errors in function bodies are ignored)
+  let e = emit_stmts(e, stmts) |> result.unwrap(e)
 
   // Implicit return undefined at end
   let e = push_const(e, JsUndefined)
@@ -1339,12 +1299,7 @@ fn emit_stmt(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError) {
       let e = emit_ir(e, IrJump(end_label))
       let e = emit_ir(e, IrLabel(else_label))
       let e = case alternate {
-        Some(alt) -> {
-          case emit_stmt(e, alt) {
-            Ok(e) -> e
-            Error(_) -> e
-          }
-        }
+        Some(alt) -> emit_stmt(e, alt) |> result.unwrap(e)
         None -> e
       }
       let e = emit_ir(e, IrLabel(end_label))
@@ -1390,18 +1345,12 @@ fn emit_stmt(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError) {
 
       // Init
       let e = case init {
-        Some(ast.ForInitExpression(expr)) -> {
-          case emit_expr(e, expr) {
-            Ok(e) -> emit_ir(e, IrPop)
-            Error(_) -> e
-          }
-        }
-        Some(ast.ForInitDeclaration(decl)) -> {
-          case emit_stmt(e, decl) {
-            Ok(e) -> e
-            Error(_) -> e
-          }
-        }
+        Some(ast.ForInitExpression(expr)) ->
+          emit_expr(e, expr)
+          |> result.map(emit_ir(_, IrPop))
+          |> result.unwrap(e)
+        Some(ast.ForInitDeclaration(decl)) ->
+          emit_stmt(e, decl) |> result.unwrap(e)
         _ -> e
       }
 
@@ -1410,32 +1359,23 @@ fn emit_stmt(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError) {
 
       // Condition
       let e = case condition {
-        Some(cond) -> {
-          case emit_expr(e, cond) {
-            Ok(e) -> emit_ir(e, IrJumpIfFalse(loop_end))
-            Error(_) -> e
-          }
-        }
+        Some(cond) ->
+          emit_expr(e, cond)
+          |> result.map(emit_ir(_, IrJumpIfFalse(loop_end)))
+          |> result.unwrap(e)
         None -> e
       }
 
       // Body
-      let e = case emit_stmt(e, body) {
-        Ok(e) -> e
-        Error(_) -> e
-      }
+      let e = emit_stmt(e, body) |> result.unwrap(e)
 
       // Continue target
       let e = emit_ir(e, IrLabel(loop_continue))
 
       // Update
       let e = case update {
-        Some(upd) -> {
-          case emit_expr(e, upd) {
-            Ok(e) -> emit_ir(e, IrPop)
-            Error(_) -> e
-          }
-        }
+        Some(upd) ->
+          emit_expr(e, upd) |> result.map(emit_ir(_, IrPop)) |> result.unwrap(e)
         None -> e
       }
 
@@ -1448,12 +1388,8 @@ fn emit_stmt(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError) {
 
     ast.ReturnStatement(arg) -> {
       let e = case arg {
-        Some(expr) -> {
-          case emit_expr(e, expr) {
-            Ok(e) -> e
-            Error(_) -> push_const(e, JsUndefined)
-          }
-        }
+        Some(expr) ->
+          emit_expr(e, expr) |> result.unwrap(push_const(e, JsUndefined))
         None -> push_const(e, JsUndefined)
       }
       let e = emit_ir(e, IrReturn)
@@ -1480,12 +1416,9 @@ fn emit_stmt(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError) {
           let e = emit_ir(e, IrLabel(catch_label))
           let e = emit_op(e, EnterScope(BlockScope))
           let e = case param {
-            Some(pattern) -> {
-              case emit_destructuring_bind(e, pattern, CatchBinding) {
-                Ok(e) -> e
-                Error(_) -> e
-              }
-            }
+            Some(pattern) ->
+              emit_destructuring_bind(e, pattern, CatchBinding)
+              |> result.unwrap(e)
             None -> emit_ir(e, IrPop)
           }
 
@@ -1539,12 +1472,9 @@ fn emit_stmt(e: Emitter, stmt: ast.Statement) -> Result(Emitter, EmitError) {
           let e = emit_ir(e, IrLabel(catch_label))
           let e = emit_op(e, EnterScope(BlockScope))
           let e = case param {
-            Some(pattern) -> {
-              case emit_destructuring_bind(e, pattern, CatchBinding) {
-                Ok(e) -> e
-                Error(_) -> e
-              }
-            }
+            Some(pattern) ->
+              emit_destructuring_bind(e, pattern, CatchBinding)
+              |> result.unwrap(e)
             None -> emit_ir(e, IrPop)
           }
           use e <- result.try(emit_stmt(e, catch_body))
@@ -2304,10 +2234,7 @@ fn emit_switch(
 
   // No match: pop discriminant and jump to default body or end
   let e = emit_ir(e, IrPop)
-  let e = case default_body_label {
-    Some(dl) -> emit_ir(e, IrJump(dl))
-    None -> emit_ir(e, IrJump(end_label))
-  }
+  let e = emit_ir(e, IrJump(option.unwrap(default_body_label, end_label)))
 
   // Phase 2: Emit trampolines — each pops discriminant and jumps to body
   let e =
@@ -2335,12 +2262,8 @@ fn emit_switch(
       }
       let e = emit_ir(e, IrLabel(label))
       case c {
-        ast.SwitchCase(_, consequent) -> {
-          case list.try_fold(consequent, e, emit_stmt) {
-            Ok(e) -> e
-            Error(_) -> e
-          }
-        }
+        ast.SwitchCase(_, consequent) ->
+          list.try_fold(consequent, e, emit_stmt) |> result.unwrap(e)
       }
     })
 

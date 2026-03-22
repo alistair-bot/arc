@@ -539,43 +539,38 @@ fn collect_exports(
     let #(acc, heap) = acc
     case entry {
       compiler.LocalExport(export_name:, local_name:) ->
-        case dict.get(scope_dict, local_name) {
-          Ok(index) ->
-            case array.get(index, locals) {
-              Some(val) -> #(dict.insert(acc, export_name, val), heap)
-              None -> #(acc, heap)
-            }
-          Error(Nil) -> #(acc, heap)
-        }
+        dict.get(scope_dict, local_name)
+        |> result.try(fn(index) {
+          array.get(index, locals) |> option.to_result(Nil)
+        })
+        |> result.map(fn(val) { #(dict.insert(acc, export_name, val), heap) })
+        |> result.unwrap(#(acc, heap))
       compiler.ReExport(export_name:, imported_name:, source_specifier:) -> {
         let resolved =
           dict.get(specifier_map, source_specifier)
           |> result.unwrap(source_specifier)
-        case dict.get(evaluated, resolved) {
-          Ok(dep_exports) ->
-            case dict.get(dep_exports, imported_name) {
-              Ok(val) -> #(dict.insert(acc, export_name, val), heap)
-              Error(Nil) -> #(acc, heap)
-            }
-          Error(Nil) -> #(acc, heap)
-        }
+        dict.get(evaluated, resolved)
+        |> result.try(dict.get(_, imported_name))
+        |> result.map(fn(val) { #(dict.insert(acc, export_name, val), heap) })
+        |> result.unwrap(#(acc, heap))
       }
       compiler.ReExportAll(source_specifier:) -> {
         let resolved =
           dict.get(specifier_map, source_specifier)
           |> result.unwrap(source_specifier)
-        case dict.get(evaluated, resolved) {
-          Ok(dep_exports) ->
+        let acc =
+          dict.get(evaluated, resolved)
+          |> result.map(
             // Re-export all except "default" (per spec §16.2.1.12.1)
-            dict.fold(dep_exports, acc, fn(acc, name, val) {
+            dict.fold(_, acc, fn(acc, name, val) {
               case name {
                 "default" -> acc
                 _ -> dict.insert(acc, name, val)
               }
-            })
-            |> fn(acc) { #(acc, heap) }
-          Error(Nil) -> #(acc, heap)
-        }
+            }),
+          )
+          |> result.unwrap(acc)
+        #(acc, heap)
       }
       compiler.ReExportNamespace(export_name:, source_specifier:) -> {
         let resolved =

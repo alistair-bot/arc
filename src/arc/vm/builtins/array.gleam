@@ -2780,12 +2780,10 @@ fn stringify_elements(
 ) -> Result(#(List(#(String, JsValue)), State), #(JsValue, State)) {
   case values {
     [] -> Ok(#(list.reverse(acc), state))
-    [val, ..rest] ->
-      case frame.to_string(state, val) {
-        Ok(#(str, state)) ->
-          stringify_elements(state, rest, [#(str, val), ..acc])
-        Error(err) -> Error(err)
-      }
+    [val, ..rest] -> {
+      use #(str, state) <- result.try(frame.to_string(state, val))
+      stringify_elements(state, rest, [#(str, val), ..acc])
+    }
   }
 }
 
@@ -2823,12 +2821,12 @@ fn insertion_sort(
 ) -> Result(#(List(JsValue), State), #(JsValue, State)) {
   case remaining {
     [] -> Ok(#(sorted, state))
-    [elem, ..rest] ->
-      case insert_into_sorted(state, sorted, elem, comparefn, []) {
-        Error(err) -> Error(err)
-        Ok(#(new_sorted, state)) ->
-          insertion_sort(state, rest, comparefn, new_sorted)
-      }
+    [elem, ..rest] -> {
+      use #(new_sorted, state) <- result.try(
+        insert_into_sorted(state, sorted, elem, comparefn, []),
+      )
+      insertion_sort(state, rest, comparefn, new_sorted)
+    }
   }
 }
 
@@ -2846,30 +2844,26 @@ fn insert_into_sorted(
     [] ->
       // End of list — insert here.
       Ok(#(list.reverse([elem, ..before]), state))
-    [head, ..tail] ->
+    [head, ..tail] -> {
       // Call comparefn(elem, head) to determine ordering.
-      case frame.call(state, comparefn, JsUndefined, [elem, head]) {
-        Error(err) -> Error(err)
-        Ok(#(result, state)) -> {
-          // SortCompare: if result is NaN, treat as +0 (equal).
-          let cmp = case result {
-            JsNumber(Finite(n)) -> n
-            // NaN or non-number → treat as 0 (no swap).
-            _ -> 0.0
-          }
-          case cmp <=. 0.0 {
-            // elem <= head: insert elem before head.
-            True ->
-              Ok(#(
-                list.append(list.reverse([elem, ..before]), [head, ..tail]),
-                state,
-              ))
-            // elem > head: keep walking.
-            False ->
-              insert_into_sorted(state, tail, elem, comparefn, [head, ..before])
-          }
-        }
+      use #(result, state) <- result.try(
+        frame.call(state, comparefn, JsUndefined, [elem, head]),
+      )
+      // SortCompare: if result is NaN, treat as +0 (equal).
+      let cmp = case result {
+        JsNumber(Finite(n)) -> n
+        _ -> 0.0
       }
+      case cmp <=. 0.0 {
+        True ->
+          Ok(#(
+            list.append(list.reverse([elem, ..before]), [head, ..tail]),
+            state,
+          ))
+        False ->
+          insert_into_sorted(state, tail, elem, comparefn, [head, ..before])
+      }
+    }
   }
 }
 

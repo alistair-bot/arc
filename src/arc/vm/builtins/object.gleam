@@ -28,6 +28,22 @@ import gleam/string
 /// V8/Node's standard ToObject failure message.
 const cannot_convert = "Cannot convert undefined or null to object"
 
+/// CPS wrapper for `object.get_value`. Use with `use` syntax:
+///   use val, state <- try_get(state, ref, key, receiver)
+/// Propagates thrown errors as `#(state, Error(thrown))`.
+fn try_get(
+  state: State,
+  ref: Ref,
+  key: String,
+  receiver: JsValue,
+  cont: fn(JsValue, State) -> #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  case object.get_value(state, ref, key, receiver) {
+    Ok(#(val, state)) -> cont(val, state)
+    Error(#(thrown, state)) -> #(state, Error(thrown))
+  }
+}
+
 /// Set up Object constructor and Object.prototype methods.
 /// Object.prototype is already allocated (it's the root of all chains).
 pub fn init(
@@ -2439,45 +2455,33 @@ fn from_entries_loop(
         )
       #(State(..state, heap:), Ok(JsObject(obj_ref)))
     }
-    [entry, ..rest] -> {
-      case entry {
-        JsObject(entry_ref) -> {
-          // Step b: k = Get(item, "0"), v = Get(item, "1")
-          // Use object.get_value to invoke getters (handles accessor properties).
-          case object.get_value(state, entry_ref, "0", entry) {
-            Error(#(thrown, state)) -> #(state, Error(thrown))
-            Ok(#(key_val, state)) ->
-              case object.get_value(state, entry_ref, "1", entry) {
-                Error(#(thrown, state)) -> #(state, Error(thrown))
-                Ok(#(val, state)) ->
-                  // Step c: ToPropertyKey(k) — symbol keys go to symbol_properties.
-                  case key_val {
-                    JsSymbol(sym) ->
-                      from_entries_loop(
-                        rest,
-                        state,
-                        str_acc,
-                        dict.insert(sym_acc, sym, value.data_property(val)),
-                      )
-                    _ -> {
-                      // ToPropertyKey via ToString for non-symbol keys.
-                      use key_str, state <- frame.try_to_string(state, key_val)
-                      from_entries_loop(
-                        rest,
-                        state,
-                        list.append(str_acc, [
-                          #(key_str, value.data_property(val)),
-                        ]),
-                        sym_acc,
-                      )
-                    }
-                  }
-              }
-          }
+    [JsObject(entry_ref) as entry, ..rest] -> {
+      // Step b: k = Get(item, "0"), v = Get(item, "1")
+      // Use object.get_value to invoke getters (handles accessor properties).
+      use key_val, state <- try_get(state, entry_ref, "0", entry)
+      use val, state <- try_get(state, entry_ref, "1", entry)
+      // Step c: ToPropertyKey(k) — symbol keys go to symbol_properties.
+      case key_val {
+        JsSymbol(sym) ->
+          from_entries_loop(
+            rest,
+            state,
+            str_acc,
+            dict.insert(sym_acc, sym, value.data_property(val)),
+          )
+        _ -> {
+          // ToPropertyKey via ToString for non-symbol keys.
+          use key_str, state <- frame.try_to_string(state, key_val)
+          from_entries_loop(
+            rest,
+            state,
+            list.append(str_acc, [#(key_str, value.data_property(val))]),
+            sym_acc,
+          )
         }
-        _ -> frame.type_error(state, "Iterator value is not an entry object")
       }
     }
+    [_, ..] -> frame.type_error(state, "Iterator value is not an entry object")
   }
 }
 
@@ -2615,28 +2619,21 @@ fn object_to_locale_string(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   case this {
-    JsObject(ref) ->
-      case object.get_value(state, ref, "toString", this) {
-        Ok(#(to_string_fn, state)) ->
-          case helpers.is_callable(state.heap, to_string_fn) {
-            True ->
-              case frame.call(state, to_string_fn, this, []) {
-                Ok(#(result, state)) -> #(state, Ok(result))
-                Error(#(thrown, state)) -> #(state, Error(thrown))
-              }
-            False ->
-              frame.type_error(
-                state,
-                "toLocaleString: toString is not callable",
-              )
-          }
-        Error(#(thrown, state)) -> #(state, Error(thrown))
+    JsObject(ref) -> {
+      use to_string_fn, state <- try_get(state, ref, "toString", this)
+      case helpers.is_callable(state.heap, to_string_fn) {
+        True -> {
+          use result, state <- frame.try_call(state, to_string_fn, this, [])
+          #(state, Ok(result))
+        }
+        False ->
+          frame.type_error(state, "toLocaleString: toString is not callable")
       }
-    _ ->
-      case frame.to_string(state, this) {
-        Ok(#(s, state)) -> #(state, Ok(JsString(s)))
-        Error(#(thrown, state)) -> #(state, Error(thrown))
-      }
+    }
+    _ -> {
+      use s, state <- frame.try_to_string(state, this)
+      #(state, Ok(JsString(s)))
+    }
   }
 }
 
@@ -2707,23 +2704,14 @@ fn group_by_loop(
       #(State(..state, heap:), Ok(JsObject(obj_ref)))
     }
     [item, ..rest] -> {
-      case
-        frame.call(state, callback, JsUndefined, [
-          item,
-          value.JsNumber(value.Finite(int.to_float(index))),
-        ])
-      {
-        Ok(#(key_val, state)) -> {
-          use key, state <- frame.try_to_string(state, key_val)
-          let current = case dict.get(groups, key) {
-            Ok(vs) -> vs
-            Error(Nil) -> []
-          }
-          let groups = dict.insert(groups, key, [item, ..current])
-          group_by_loop(state, rest, callback, index + 1, groups)
-        }
-        Error(#(thrown, state)) -> #(state, Error(thrown))
-      }
+      use key_val, state <- frame.try_call(state, callback, JsUndefined, [
+        item,
+        value.JsNumber(value.Finite(int.to_float(index))),
+      ])
+      use key, state <- frame.try_to_string(state, key_val)
+      let current = dict.get(groups, key) |> result.unwrap([])
+      let groups = dict.insert(groups, key, [item, ..current])
+      group_by_loop(state, rest, callback, index + 1, groups)
     }
   }
 }

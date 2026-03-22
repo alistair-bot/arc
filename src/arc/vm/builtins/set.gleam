@@ -77,16 +77,26 @@ pub fn init(
     ..proto_methods
   ]
 
-  common.init_type(
-    h,
-    object_proto,
-    function_proto,
-    proto_props,
-    fn(proto) { Dispatch(SetNative(SetConstructor(proto:))) },
-    "Set",
-    0,
-    [],
-  )
+  let #(h, bt) =
+    common.init_type(
+      h,
+      object_proto,
+      function_proto,
+      proto_props,
+      fn(proto) { Dispatch(SetNative(SetConstructor(proto:))) },
+      "Set",
+      0,
+      [],
+    )
+  // §24.2.3.16 Set.prototype [ @@toStringTag ] = "Set"
+  let h =
+    common.add_symbol_property(
+      h,
+      bt.prototype,
+      value.symbol_to_string_tag,
+      value.builtin_property(value.JsString("Set")),
+    )
+  #(h, bt)
 }
 
 /// Per-module dispatch for Set native functions.

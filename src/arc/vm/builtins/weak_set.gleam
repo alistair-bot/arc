@@ -29,16 +29,25 @@ pub fn init(
       #("delete", WeakSetNative(WeakSetPrototypeDelete), 1),
     ])
 
-  common.init_type(
-    h,
-    object_proto,
-    function_proto,
-    proto_methods,
-    fn(proto) { Dispatch(WeakSetNative(WeakSetConstructor(proto:))) },
-    "WeakSet",
-    0,
-    [],
-  )
+  let #(h, bt) =
+    common.init_type(
+      h,
+      object_proto,
+      function_proto,
+      proto_methods,
+      fn(proto) { Dispatch(WeakSetNative(WeakSetConstructor(proto:))) },
+      "WeakSet",
+      0,
+      [],
+    )
+  let h =
+    common.add_symbol_property(
+      h,
+      bt.prototype,
+      value.symbol_to_string_tag,
+      value.builtin_property(value.JsString("WeakSet")),
+    )
+  #(h, bt)
 }
 
 /// Per-module dispatch for WeakSet native functions.

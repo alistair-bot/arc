@@ -326,6 +326,26 @@ pub fn init_type(
   #(h, BuiltinType(prototype: proto_ref, constructor: ctor_ref))
 }
 
+/// Add a symbol-keyed property to an existing object (typically a prototype).
+/// Used after init_type to wire up Symbol.iterator, Symbol.toStringTag, etc.
+pub fn add_symbol_property(
+  h: Heap,
+  ref: Ref,
+  symbol: value.SymbolId,
+  prop: Property,
+) -> Heap {
+  heap.update(h, ref, fn(slot) {
+    case slot {
+      ObjectSlot(symbol_properties:, ..) ->
+        ObjectSlot(
+          ..slot,
+          symbol_properties: dict.insert(symbol_properties, symbol, prop),
+        )
+      other -> other
+    }
+  })
+}
+
 /// Proto-ctor cycle for a pre-allocated prototype (Object, Function bootstrap).
 ///
 /// Not a spec operation — internal bootstrap helper.

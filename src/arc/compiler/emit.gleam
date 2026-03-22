@@ -2919,9 +2919,9 @@ fn emit_destructuring_bind(
       emit_destructuring_bind(e, left, binding_kind)
     }
 
-    ast.RestElement(_) -> {
-      let _e = emit_ir(e, IrPop)
-      Error(Unsupported("rest element in destructuring"))
+    ast.RestElement(argument:) -> {
+      // Rest element outside array pattern — treat as identity bind
+      emit_destructuring_bind(e, argument, binding_kind)
     }
   }
 }
@@ -2992,6 +2992,15 @@ fn emit_array_elements(
   case elements {
     [] -> Ok(e)
     [None, ..rest] -> emit_array_elements(e, rest, index + 1, binding_kind)
+    // Rest element: arr.slice(index) to get remaining elements
+    [Some(ast.RestElement(argument:)), ..] -> {
+      // Stack: [arr, ...] — need [index, slice_fn, arr, ...]
+      let e = emit_ir(e, IrDup)
+      let e = emit_ir(e, IrGetField2("slice"))
+      let e = push_const(e, JsNumber(Finite(int.to_float(index))))
+      let e = emit_ir(e, IrCallMethod("slice", 1))
+      emit_destructuring_bind(e, argument, binding_kind)
+    }
     [Some(pattern), ..rest] -> {
       let e = emit_ir(e, IrDup)
       let e = push_const(e, JsNumber(Finite(int.to_float(index))))

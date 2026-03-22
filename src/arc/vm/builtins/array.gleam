@@ -82,16 +82,37 @@ pub fn init(
       #("from", ArrayNative(ArrayFrom), 1),
       #("of", ArrayNative(ArrayOf), 0),
     ])
-  common.init_type(
-    h,
-    object_proto,
-    function_proto,
-    proto_methods,
-    fn(_) { Dispatch(ArrayNative(ArrayConstructor)) },
-    "Array",
-    1,
-    static_methods,
-  )
+  let #(h, bt) =
+    common.init_type(
+      h,
+      object_proto,
+      function_proto,
+      proto_methods,
+      fn(_) { Dispatch(ArrayNative(ArrayConstructor)) },
+      "Array",
+      1,
+      static_methods,
+    )
+
+  // §23.1.3.37 Array.prototype [ @@iterator ] ( )
+  // "The initial value of the @@iterator property is %Array.prototype.values%"
+  let #(h, values_fn_ref) =
+    common.alloc_native_fn(
+      h,
+      function_proto,
+      ArrayNative(value.ArrayPrototypeValues),
+      "values",
+      0,
+    )
+  let h =
+    common.add_symbol_property(
+      h,
+      bt.prototype,
+      value.symbol_iterator,
+      value.builtin_property(JsObject(values_fn_ref)),
+    )
+
+  #(h, bt)
 }
 
 /// Dispatch an ArrayNativeFn to the corresponding implementation.

@@ -87,16 +87,26 @@ pub fn init(
   // Build the prototype + constructor using the standard init_type helper.
   // The constructor carries the proto ref so it can set [[Prototype]] on
   // new Map instances.
-  common.init_type(
-    h,
-    object_proto,
-    function_proto,
-    proto_methods,
-    fn(proto) { Dispatch(MapNative(MapConstructor(proto:))) },
-    "Map",
-    0,
-    [],
-  )
+  let #(h, bt) =
+    common.init_type(
+      h,
+      object_proto,
+      function_proto,
+      proto_methods,
+      fn(proto) { Dispatch(MapNative(MapConstructor(proto:))) },
+      "Map",
+      0,
+      [],
+    )
+  // §24.1.3.14 Map.prototype [ @@toStringTag ] = "Map"
+  let h =
+    common.add_symbol_property(
+      h,
+      bt.prototype,
+      value.symbol_to_string_tag,
+      value.builtin_property(value.JsString("Map")),
+    )
+  #(h, bt)
 }
 
 // ============================================================================

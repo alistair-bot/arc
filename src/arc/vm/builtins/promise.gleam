@@ -48,16 +48,26 @@ pub fn init(
       #("allSettled", value.PromiseAllSettledStatic, 1),
       #("any", value.PromiseAnyStatic, 1),
     ])
-  common.init_type(
-    h,
-    object_proto,
-    function_proto,
-    proto_methods,
-    fn(_) { Call(PromiseConstructor) },
-    "Promise",
-    1,
-    static_methods,
-  )
+  let #(h, bt) =
+    common.init_type(
+      h,
+      object_proto,
+      function_proto,
+      proto_methods,
+      fn(_) { Call(PromiseConstructor) },
+      "Promise",
+      1,
+      static_methods,
+    )
+  // §27.2.5.6 Promise.prototype [ @@toStringTag ] = "Promise"
+  let h =
+    common.add_symbol_property(
+      h,
+      bt.prototype,
+      value.symbol_to_string_tag,
+      value.builtin_property(value.JsString("Promise")),
+    )
+  #(h, bt)
 }
 
 /// Partial ES2024 §27.2.3.1 Promise(executor) — the object allocation part.

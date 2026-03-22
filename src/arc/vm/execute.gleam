@@ -2397,23 +2397,12 @@ fn step_iteration(
           case iterable {
             JsObject(ref) ->
               case heap.read(state.heap, ref) {
+                // Array/Arguments fast path: use ArrayIteratorSlot when
+                // Symbol.iterator hasn't been overridden on the instance.
                 Some(ObjectSlot(kind: ArrayObject(_), ..))
-                | Some(ObjectSlot(kind: value.ArgumentsObject(_), ..)) -> {
-                  // Lazy iterator — stores source ref + index, reads elements one at a time.
-                  let #(heap, iter_ref) =
-                    heap.alloc(
-                      state.heap,
-                      ArrayIteratorSlot(source: ref, index: 0),
-                    )
-                  Ok(
-                    State(
-                      ..state,
-                      stack: [JsObject(iter_ref), ..rest],
-                      heap:,
-                      pc: state.pc + 1,
-                    ),
-                  )
-                }
+                | Some(ObjectSlot(kind: value.ArgumentsObject(_), ..)) ->
+                  get_iterator_array_fast_path(state, ref, iterable, rest)
+
                 Some(ObjectSlot(kind: GeneratorObject(_), ..)) -> {
                   // Generators are their own iterators
                   Ok(
@@ -2424,11 +2413,38 @@ fn step_iteration(
                     ),
                   )
                 }
-                // Non-array object — throw TypeError
+                // Any other object (or array with overridden Symbol.iterator):
+                // look up Symbol.iterator per §7.4.1 GetIterator
+                Some(ObjectSlot(..)) ->
+                  get_iterator_via_symbol(state, ref, iterable, rest)
                 _ ->
                   frame.throw_type_error(
                     state,
-                    object.inspect(JsObject(ref), state.heap)
+                    object.inspect(iterable, state.heap)
+                      <> " is not iterable",
+                  )
+              }
+            // String primitive: iterate UTF-16 code units
+            JsString(_) ->
+              case
+                common.to_object(state.heap, state.builtins, iterable)
+              {
+                Some(#(h, wrapper_ref)) -> {
+                  let #(h, iter_ref) =
+                    heap.alloc(h, ArrayIteratorSlot(source: wrapper_ref, index: 0))
+                  Ok(
+                    State(
+                      ..state,
+                      stack: [JsObject(iter_ref), ..rest],
+                      heap: h,
+                      pc: state.pc + 1,
+                    ),
+                  )
+                }
+                None ->
+                  frame.throw_type_error(
+                    state,
+                    object.inspect(iterable, state.heap)
                       <> " is not iterable",
                   )
               }
@@ -2979,5 +2995,84 @@ fn binop_add_with_to_primitive(
         ),
       )
     }
+  }
+}
+
+/// Array/Arguments fast path for GetIterator: use ArrayIteratorSlot directly
+/// if Symbol.iterator hasn't been overridden on the instance. If it has been
+/// overridden, fall through to the spec-compliant Symbol.iterator lookup.
+fn get_iterator_array_fast_path(
+  state: State,
+  ref: value.Ref,
+  iterable: JsValue,
+  rest_stack: List(JsValue),
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  let has_override = case heap.read(state.heap, ref) {
+    Some(ObjectSlot(symbol_properties: sym_props, ..)) ->
+      dict.has_key(sym_props, value.symbol_iterator)
+    _ -> False
+  }
+  case has_override {
+    False -> {
+      let #(h, iter_ref) =
+        heap.alloc(state.heap, ArrayIteratorSlot(source: ref, index: 0))
+      Ok(
+        State(
+          ..state,
+          stack: [JsObject(iter_ref), ..rest_stack],
+          heap: h,
+          pc: state.pc + 1,
+        ),
+      )
+    }
+    True -> get_iterator_via_symbol(state, ref, iterable, rest_stack)
+  }
+}
+
+/// ES2024 §7.4.1 GetIterator(obj, kind) — look up Symbol.iterator and call it.
+/// Used when the fast path (ArrayObject without overridden Symbol.iterator) doesn't apply.
+fn get_iterator_via_symbol(
+  state: State,
+  ref: value.Ref,
+  iterable: JsValue,
+  rest_stack: List(JsValue),
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  // Step 1: Let method be ? GetMethod(obj, @@iterator)
+  case object.get_symbol_value(state, ref, value.symbol_iterator, iterable) {
+    Ok(#(method, state)) ->
+      case coerce.is_callable_value(state.heap, method) {
+        True ->
+          // Step 2: Let iterator be ? Call(method, obj)
+          case frame.call(state, method, iterable, []) {
+            Ok(#(iterator, state)) ->
+              case iterator {
+                JsObject(iter_ref) ->
+                  Ok(
+                    State(
+                      ..state,
+                      stack: [JsObject(iter_ref), ..rest_stack],
+                      pc: state.pc + 1,
+                    ),
+                  )
+                _ ->
+                  frame.throw_type_error(
+                    state,
+                    "Iterator result is not an object",
+                  )
+              }
+            Error(#(thrown, state)) ->
+              Error(#(Thrown, thrown, state.heap))
+          }
+        False ->
+          frame.throw_type_error(
+            state,
+            object.inspect(iterable, state.heap) <> " is not iterable",
+          )
+      }
+    Error(#(_thrown, state)) ->
+      frame.throw_type_error(
+        state,
+        object.inspect(iterable, state.heap) <> " is not iterable",
+      )
   }
 }

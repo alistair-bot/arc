@@ -201,12 +201,10 @@ fn string_char_at(
   use s, state <- with_this_string(this, state)
   // Step 3: ToIntegerOrInfinity(pos)
   let idx = helpers.get_int_arg(args, 0, 0)
-  // Step 4: size = length of S
-  let len = string.length(s)
-  // Steps 5-6: bounds check, return char or ""
-  case idx >= 0 && idx < len {
-    True -> #(state, Ok(JsString(string.slice(s, idx, 1))))
-    False -> #(state, Ok(JsString("")))
+  // Steps 4-6: bounds check built into FFI, returns None if out of range
+  case object.string_char_at(s, idx) {
+    Some(ch) -> #(state, Ok(JsString(ch)))
+    None -> #(state, Ok(JsString("")))
   }
 }
 
@@ -232,13 +230,9 @@ fn string_char_code_at(
   use s, state <- with_this_string(this, state)
   // Step 3: ToIntegerOrInfinity(pos)
   let idx = helpers.get_int_arg(args, 0, 0)
-  // Step 4: size = length of S
-  let len = string.length(s)
-  // Step 5: out of bounds => NaN
-  case idx >= 0 && idx < len {
-    True -> {
-      // Step 6: return code unit value
-      let ch = string.slice(s, idx, 1)
+  // Steps 4-6: bounds check built into FFI, returns None if out of range
+  case object.string_char_at(s, idx) {
+    Some(ch) ->
       case string.to_utf_codepoints(ch) {
         [cp, ..] -> {
           let code = string.utf_codepoint_to_int(cp)
@@ -246,8 +240,7 @@ fn string_char_code_at(
         }
         [] -> #(state, Ok(JsNumber(NaN)))
       }
-    }
-    False -> #(state, Ok(JsNumber(NaN)))
+    None -> #(state, Ok(JsNumber(NaN)))
   }
 }
 

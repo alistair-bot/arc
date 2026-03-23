@@ -84,6 +84,25 @@ export function tree_array_resize({ d, a }, new_size) {
 	return { d, a: a.slice(0, new_size) };
 }
 
+// -- Fast string indexing (codepoint-based, no grapheme clustering) ---------
+
+export function string_char_at(s, idx) {
+	if (idx < 0) return new None();
+	const it = s[Symbol.iterator]();
+	let r;
+	for (let i = 0; i <= idx; i++) {
+		r = it.next();
+		if (r.done) return new None();
+	}
+	return new Some(r.value);
+}
+
+export function string_codepoint_length(s) {
+	let n = 0;
+	for (const _ of s) n++;
+	return n;
+}
+
 // -- Symbol identity: monotonic counter instead of make_ref() ----------------
 
 let ref_counter = 0;

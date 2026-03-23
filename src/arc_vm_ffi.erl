@@ -8,6 +8,7 @@
 -export([receive_any_event/0, receive_settle_only/0, send_after/3, cancel_timer/1]).
 -export([receive_user_message/0, receive_user_message_timeout/1]).
 -export([get_script_args/0, sleep/1]).
+-export([string_char_at/2, string_codepoint_length/1]).
 
 read_line(Prompt) ->
     case io:get_line(Prompt) of
@@ -83,6 +84,29 @@ tree_array_resize(A, NewSize) when NewSize >= 0 ->
     array:resize(NewSize, A);
 tree_array_resize(A, _NewSize) ->
     A.
+
+%% Fast string indexing by codepoint (not grapheme cluster). Gleam's
+%% string.slice/string.length do grapheme segmentation via unicode_util:gc
+%% which is ~20x slower and spec-incorrect for JS (which uses UTF-16 code
+%% units). Codepoints are closer to correct and far cheaper.
+%%
+%% TODO(Deviation): still not fully spec-correct — JS indexes by UTF-16
+%% code unit, so astral-plane chars (U+10000+) should count as 2 indices.
+%% A full fix needs UTF-16 string storage. Codepoint indexing matches
+%% grapheme indexing for all BMP chars so this is strictly more correct
+%% than the previous string.slice approach.
+string_char_at(Bin, Idx) when Idx >= 0 ->
+    char_at_skip(Bin, Idx);
+string_char_at(_, _) -> none.
+
+char_at_skip(<<C/utf8, _/binary>>, 0) -> {some, <<C/utf8>>};
+char_at_skip(<<_/utf8, Rest/binary>>, N) -> char_at_skip(Rest, N - 1);
+char_at_skip(_, _) -> none.
+
+string_codepoint_length(Bin) -> cp_length(Bin, 0).
+cp_length(<<>>, N) -> N;
+cp_length(<<_/utf8, Rest/binary>>, N) -> cp_length(Rest, N + 1);
+cp_length(<<_, Rest/binary>>, N) -> cp_length(Rest, N + 1).
 
 %% Process primitives for Arc.send/receive
 send_message(Pid, Msg) -> Pid ! Msg, nil.

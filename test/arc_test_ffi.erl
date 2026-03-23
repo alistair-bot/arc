@@ -55,13 +55,10 @@ main() ->
     ModuleCount = length(TestModules) + case HasTest262 of true -> 1; false -> 0 end,
     io:format("Running ~b tests across ~b modules~n", [Total, ModuleCount]),
 
-    %% Spawn tests with bounded concurrency — avoids 53k processes fighting
-    %% for 16 scheduler threads. Each running test gets meaningful CPU time
-    %% instead of being preempted thousands of times.
     Parent = self(),
     Ref = make_ref(),
     T0 = erlang:monotonic_time(millisecond),
-    MaxWorkers = erlang:system_info(schedulers_online) * 8,
+    MaxWorkers = erlang:system_info(schedulers_online),
     spawn_link(fun() -> feeder(AllTests, Parent, Ref, MaxWorkers) end),
 
     %% Collect results with live progress + stall detection
@@ -320,25 +317,26 @@ to_list(V) when is_atom(V) -> atom_to_list(V);
 to_list(V) when is_list(V) -> V;
 to_list(V) -> lists:flatten(io_lib:format("~p", [V])).
 
-%% Per-test timeout. Unit tests get 10s. test262 gets 30s except for a handful
-%% of codepoint-iteration tests that take 80-100s locally / 400+s on CI
-%% (they iterate 0..0x10FFFF building/matching giant strings).
+%% Per-test timeout. Unit tests get 10s. test262 gets 30s except for a
+%% handful of codepoint-iteration tests that are ~13s locally / ~40s CI
+%% (A2.5 does 1M decodeURI calls, CharacterClassEscapes iterate 0..0x10FFFF).
 timeout_for(Name) ->
     case binary:match(Name, <<"test262/">>) of
         nomatch -> 10000;
         _ ->
             case is_slow_test(Name) of
-                true -> 600000;
-                false -> 30000
+                true -> 90_000;
+                false -> 30_000
             end
     end.
 
 is_slow_test(Name) ->
     Slow = [
         <<"RegExp/CharacterClassEscapes/character-class-">>,
-        <<"decodeURI/S15.1.3.1_A2.5_T1">>,
-        <<"decodeURIComponent/S15.1.3.2_A2.5_T1">>,
-        <<"encodeURI/S15.1.3.3_A2.3_T1">>,
-        <<"encodeURIComponent/S15.1.3.4_A2.3_T1">>
+        %% URI A2.* tests iterate the full codepoint range
+        <<"decodeURI/S15.1.3.1_A2.">>,
+        <<"decodeURIComponent/S15.1.3.2_A2.">>,
+        <<"encodeURI/S15.1.3.3_A2.">>,
+        <<"encodeURIComponent/S15.1.3.4_A2.">>
     ],
     lists:any(fun(P) -> binary:match(Name, P) =/= nomatch end, Slow).

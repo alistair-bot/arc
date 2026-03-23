@@ -9,8 +9,7 @@ JavaScript on the BEAM.
   <source media="(prefers-color-scheme: dark)" srcset="./.github/js.png">
   <img alt="js" src="./.github/js-light.png">
 </picture>
-
-<br>
+<br><br>
 
 Traditionally, JavaScript does concurrency with one event loop and a shared heap. The BEAM does it with isolated processes that share nothing. Arc is an experiment in running the former on the latter.
 

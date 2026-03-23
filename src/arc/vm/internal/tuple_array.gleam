@@ -6,22 +6,22 @@ pub type TupleArray(a)
 
 /// Convert a list to an array. O(n).
 @external(erlang, "erlang", "list_to_tuple")
-@external(javascript, "../../../arc_vm_ffi.mjs", "array_from_list")
+@external(javascript, "../arc_vm_ffi.mjs", "array_from_list")
 pub fn from_list(items: List(a)) -> TupleArray(a)
 
 /// Convert an array back to a list. O(n).
 @external(erlang, "erlang", "tuple_to_list")
-@external(javascript, "../../../arc_vm_ffi.mjs", "array_to_list")
+@external(javascript, "../arc_vm_ffi.mjs", "array_to_list")
 pub fn to_list(arr: TupleArray(a)) -> List(a)
 
 /// Read element at index (0-based). O(1).
 @external(erlang, "arc_vm_ffi", "array_get")
-@external(javascript, "../../../arc_vm_ffi.mjs", "array_get")
+@external(javascript, "../arc_vm_ffi.mjs", "array_get")
 pub fn get(index: Int, arr: TupleArray(a)) -> Option(a)
 
 /// Write element at index (0-based), returning a new array. O(n) copy.
 @external(erlang, "arc_vm_ffi", "array_set")
-@external(javascript, "../../../arc_vm_ffi.mjs", "array_set")
+@external(javascript, "../arc_vm_ffi.mjs", "array_set")
 pub fn set(
   index: Int,
   value: a,
@@ -30,16 +30,16 @@ pub fn set(
 
 /// Number of elements. O(1).
 @external(erlang, "erlang", "tuple_size")
-@external(javascript, "../../../arc_vm_ffi.mjs", "array_size")
+@external(javascript, "../arc_vm_ffi.mjs", "array_size")
 pub fn size(arr: TupleArray(a)) -> Int
 
 /// Create an array of `count` elements all set to `value`. O(n).
 @external(erlang, "arc_vm_ffi", "array_repeat")
-@external(javascript, "../../../arc_vm_ffi.mjs", "array_repeat")
+@external(javascript, "../arc_vm_ffi.mjs", "array_repeat")
 pub fn repeat(value: a, count: Int) -> TupleArray(a)
 
 /// Grow an array to `new_size`, filling new slots with `default`. O(n).
 /// If `new_size` <= current size, returns the array unchanged.
 @external(erlang, "arc_vm_ffi", "array_grow")
-@external(javascript, "../../../arc_vm_ffi.mjs", "array_grow")
+@external(javascript, "../arc_vm_ffi.mjs", "array_grow")
 pub fn grow(arr: TupleArray(a), new_size: Int, default: a) -> TupleArray(a)

@@ -16873,6 +16873,7 @@ language/expressions/yield/rhs-unresolvable.js
 language/expressions/yield/rhs-yield.js
 language/expressions/yield/star-array.js
 language/expressions/yield/star-in-iteration-stmt.js
+language/expressions/yield/star-return-is-null.js
 language/expressions/yield/star-rhs-iter-get-call-err.js
 language/expressions/yield/star-rhs-iter-get-call-non-obj.js
 language/expressions/yield/star-rhs-iter-nrml-next-call-err.js
@@ -16882,7 +16883,12 @@ language/expressions/yield/star-rhs-iter-nrml-next-invoke.js
 language/expressions/yield/star-rhs-iter-nrml-res-done-err.js
 language/expressions/yield/star-rhs-iter-nrml-res-value-err.js
 language/expressions/yield/star-rhs-iter-nrml-res-value-final.js
+language/expressions/yield/star-rhs-iter-rtrn-no-rtrn.js
+language/expressions/yield/star-rhs-iter-rtrn-rtrn-invoke.js
+language/expressions/yield/star-rhs-iter-thrw-res-value-final.js
+language/expressions/yield/star-rhs-iter-thrw-thrw-invoke.js
 language/expressions/yield/star-rhs-unresolvable.js
+language/expressions/yield/star-throw-is-null.js
 language/expressions/yield/then-return.js
 language/expressions/yield/within-for.js
 language/function-code/10.4.3-1-1-s.js
@@ -24651,6 +24657,7 @@ staging/sm/generators/gen-with-call-obj.js
 staging/sm/generators/regress-366941.js
 staging/sm/generators/yield-error.js
 staging/sm/generators/yield-non-regexp.js
+staging/sm/generators/yield-star-iterator-close.js
 staging/sm/generators/yield-star-iterator-primitive.js
 staging/sm/global/bug-320887.js
 staging/sm/global/direct-eval-but-not.js

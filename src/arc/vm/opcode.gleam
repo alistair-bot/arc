@@ -135,6 +135,11 @@ pub type Op {
   InitialYield
   /// Pop value from stack, suspend generator. On resume, .next(arg) pushed.
   Yield
+  /// Self-looping delegate yield. Stack: [arg, iter, ..]. Calls iter.next(arg).
+  /// If done → pops both, pushes result.value, pc+1. If !done → yields
+  /// result.value, leaves [iter] on stack, pc stays (re-executes on resume
+  /// with [resume_val, iter]).
+  YieldStar
 
   // -- Async --
   /// Pop value from stack, wrap in Promise.resolve, suspend async function.
@@ -295,6 +300,7 @@ pub type IrOp {
   IrCallSuper(arity: Int)
   IrInitialYield
   IrYield
+  IrYieldStar
   IrAwait
   IrCreateArguments
   IrNewRegExp

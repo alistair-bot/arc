@@ -23,6 +23,7 @@ import arc/vm/opcode.{
   MakeClosure, NewObject, NewRegExp, ObjectSpread, Pop, PushConst, PushTry,
   PutBoxed, PutElem, PutEvalVar, PutField, PutGlobal, PutLocal, Return,
   SetupDerivedClass, Swap, TypeOf, TypeofEvalVar, TypeofGlobal, UnaryOp, Yield,
+  YieldStar,
 }
 import arc/vm/ops/array as array_ops
 import arc/vm/ops/coerce
@@ -279,6 +280,8 @@ pub fn execute_inner(state: State) -> Result(#(Completion, State), VmError) {
         Error(#(Yielded, yielded_value, heap)) -> {
           // Generator yielded — build suspended state.
           // For Yield: pop the yielded value from stack, advance pc.
+          // For YieldStar: pop arg (keep iter), DON'T advance pc — resume
+          //   re-executes YieldStar with [resume_val, iter, ..].
           // For InitialYield: stack unchanged, just advance pc.
           let suspended_state = case op {
             Yield ->
@@ -290,6 +293,15 @@ pub fn execute_inner(state: State) -> Result(#(Completion, State), VmError) {
                   [] -> []
                 },
                 pc: state.pc + 1,
+              )
+            YieldStar ->
+              State(
+                ..state,
+                heap:,
+                stack: case state.stack {
+                  [_arg, ..rest] -> rest
+                  [] -> []
+                },
               )
             _ -> State(..state, heap:, pc: state.pc + 1)
           }
@@ -500,7 +512,7 @@ fn step(state: State, op: Op) -> Result(State, #(StepResult, JsValue, Heap)) {
     | IteratorClose -> step_iteration(state, op)
 
     // Generator/async
-    InitialYield | Yield | Await -> step_generators(state, op)
+    InitialYield | Yield | YieldStar | Await -> step_generators(state, op)
 
     // Special
     CreateArguments | NewRegExp -> step_special(state, op)
@@ -2954,6 +2966,64 @@ fn step_generators(
       case state.stack {
         [yielded_value, ..] -> Error(#(Yielded, yielded_value, state.heap))
         [] -> Error(#(Yielded, JsUndefined, state.heap))
+      }
+    }
+
+    YieldStar -> {
+      // Self-looping delegate: [arg, iter, ..rest]. Calls iter.next(arg).
+      // done → push value, pc+1. !done → yield value; execute_inner keeps pc
+      // here so next resume re-enters with [resume_val, iter].
+      case state.stack {
+        [arg, JsObject(iter_ref) as iter, ..rest] -> {
+          use #(next_fn, state) <- result.try(
+            state.rethrow(object.get_value(
+              state,
+              iter_ref,
+              Named("next"),
+              iter,
+            )),
+          )
+          use #(res, state) <- result.try(
+            state.rethrow(state.call(state, next_fn, iter, [arg])),
+          )
+          case res {
+            JsObject(rref) -> {
+              use #(done, state) <- result.try(
+                state.rethrow(object.get_value(
+                  state,
+                  rref,
+                  Named("done"),
+                  res,
+                )),
+              )
+              use #(val, state) <- result.try(
+                state.rethrow(object.get_value(
+                  state,
+                  rref,
+                  Named("value"),
+                  res,
+                )),
+              )
+              case value.is_truthy(done) {
+                True ->
+                  Ok(State(..state, stack: [val, ..rest], pc: state.pc + 1))
+                False ->
+                  // execute_inner's YieldStar arm strips arg from the
+                  // original stack and keeps pc here, so resume loops back
+                  // with [resume_val, iter, ..rest].
+                  Error(#(Yielded, val, state.heap))
+              }
+            }
+            _ ->
+              state.throw_type_error(state, "Iterator result is not an object")
+          }
+        }
+        _ ->
+          Error(#(
+            StepVmError(StackUnderflow("YieldStar")),
+            JsUndefined,
+            state.heap,
+          ))
       }
     }
 

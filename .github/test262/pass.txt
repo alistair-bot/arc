@@ -12875,6 +12875,8 @@ language/expressions/class/elements/after-same-line-gen-rs-privatename-identifie
 language/expressions/class/elements/after-same-line-gen-rs-privatename-identifier.js
 language/expressions/class/elements/after-same-line-gen-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-gen-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/after-same-line-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/after-same-line-gen-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-gen-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-gen-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -12899,6 +12901,8 @@ language/expressions/class/elements/after-same-line-method-rs-privatename-identi
 language/expressions/class/elements/after-same-line-method-rs-privatename-identifier.js
 language/expressions/class/elements/after-same-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-method-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/after-same-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/after-same-line-method-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-method-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-method-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -12925,6 +12929,8 @@ language/expressions/class/elements/after-same-line-static-async-gen-rs-static-a
 language/expressions/class/elements/after-same-line-static-async-gen-rs-static-async-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-async-gen-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-async-gen-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/after-same-line-static-async-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/after-same-line-static-async-gen-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-async-gen-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-async-gen-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-async-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -12951,6 +12957,8 @@ language/expressions/class/elements/after-same-line-static-async-method-rs-stati
 language/expressions/class/elements/after-same-line-static-async-method-rs-static-async-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-async-method-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-async-method-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/after-same-line-static-async-method-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/after-same-line-static-async-method-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-async-method-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-async-method-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-async-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -12975,6 +12983,8 @@ language/expressions/class/elements/after-same-line-static-gen-rs-privatename-id
 language/expressions/class/elements/after-same-line-static-gen-rs-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-gen-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-gen-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/after-same-line-static-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/after-same-line-static-gen-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-gen-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-gen-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -12999,6 +13009,8 @@ language/expressions/class/elements/after-same-line-static-method-rs-privatename
 language/expressions/class/elements/after-same-line-static-method-rs-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-method-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-method-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/after-same-line-static-method-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/after-same-line-static-method-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-method-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/after-same-line-static-method-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/after-same-line-static-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -13115,6 +13127,8 @@ language/expressions/class/elements/multiple-definitions-rs-privatename-identifi
 language/expressions/class/elements/multiple-definitions-rs-privatename-identifier.js
 language/expressions/class/elements/multiple-definitions-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/multiple-definitions-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/multiple-definitions-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/multiple-definitions-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/multiple-definitions-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/multiple-definitions-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/multiple-definitions-rs-static-privatename-identifier-alt-by-classname.js
@@ -13139,6 +13153,8 @@ language/expressions/class/elements/multiple-stacked-definitions-rs-privatename-
 language/expressions/class/elements/multiple-stacked-definitions-rs-privatename-identifier.js
 language/expressions/class/elements/multiple-stacked-definitions-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/multiple-stacked-definitions-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/multiple-stacked-definitions-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/multiple-stacked-definitions-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/multiple-stacked-definitions-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/multiple-stacked-definitions-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/multiple-stacked-definitions-rs-static-privatename-identifier-alt-by-classname.js
@@ -13199,6 +13215,8 @@ language/expressions/class/elements/new-no-sc-line-method-rs-privatename-identif
 language/expressions/class/elements/new-no-sc-line-method-rs-privatename-identifier.js
 language/expressions/class/elements/new-no-sc-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/new-no-sc-line-method-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/new-no-sc-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/new-no-sc-line-method-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/new-no-sc-line-method-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/new-no-sc-line-method-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/new-no-sc-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -13223,6 +13241,8 @@ language/expressions/class/elements/new-sc-line-gen-rs-privatename-identifier-in
 language/expressions/class/elements/new-sc-line-gen-rs-privatename-identifier.js
 language/expressions/class/elements/new-sc-line-gen-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/new-sc-line-gen-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/new-sc-line-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/new-sc-line-gen-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/new-sc-line-gen-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/new-sc-line-gen-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/new-sc-line-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -13247,6 +13267,8 @@ language/expressions/class/elements/new-sc-line-method-rs-privatename-identifier
 language/expressions/class/elements/new-sc-line-method-rs-privatename-identifier.js
 language/expressions/class/elements/new-sc-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/new-sc-line-method-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/new-sc-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/new-sc-line-method-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/new-sc-line-method-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/new-sc-line-method-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/new-sc-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -13328,6 +13350,8 @@ language/expressions/class/elements/regular-definitions-rs-privatename-identifie
 language/expressions/class/elements/regular-definitions-rs-privatename-identifier.js
 language/expressions/class/elements/regular-definitions-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/regular-definitions-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/regular-definitions-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/regular-definitions-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/regular-definitions-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/regular-definitions-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/regular-definitions-rs-static-privatename-identifier-alt-by-classname.js
@@ -13354,6 +13378,8 @@ language/expressions/class/elements/same-line-async-gen-rs-static-async-generato
 language/expressions/class/elements/same-line-async-gen-rs-static-async-generator-method-privatename-identifier.js
 language/expressions/class/elements/same-line-async-gen-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-async-gen-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/same-line-async-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/same-line-async-gen-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/same-line-async-gen-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-async-gen-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/same-line-async-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -13380,6 +13406,8 @@ language/expressions/class/elements/same-line-async-method-rs-static-async-gener
 language/expressions/class/elements/same-line-async-method-rs-static-async-generator-method-privatename-identifier.js
 language/expressions/class/elements/same-line-async-method-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-async-method-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/same-line-async-method-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/same-line-async-method-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/same-line-async-method-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-async-method-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/same-line-async-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -13404,6 +13432,8 @@ language/expressions/class/elements/same-line-gen-rs-privatename-identifier-init
 language/expressions/class/elements/same-line-gen-rs-privatename-identifier.js
 language/expressions/class/elements/same-line-gen-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-gen-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/same-line-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/same-line-gen-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/same-line-gen-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-gen-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/same-line-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -13428,6 +13458,8 @@ language/expressions/class/elements/same-line-method-rs-privatename-identifier-i
 language/expressions/class/elements/same-line-method-rs-privatename-identifier.js
 language/expressions/class/elements/same-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-method-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/same-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/same-line-method-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/same-line-method-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/same-line-method-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/same-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -13657,6 +13689,8 @@ language/expressions/class/elements/wrapped-in-sc-rs-privatename-identifier-init
 language/expressions/class/elements/wrapped-in-sc-rs-privatename-identifier.js
 language/expressions/class/elements/wrapped-in-sc-rs-static-async-method-privatename-identifier-alt.js
 language/expressions/class/elements/wrapped-in-sc-rs-static-async-method-privatename-identifier.js
+language/expressions/class/elements/wrapped-in-sc-rs-static-generator-method-privatename-identifier-alt.js
+language/expressions/class/elements/wrapped-in-sc-rs-static-generator-method-privatename-identifier.js
 language/expressions/class/elements/wrapped-in-sc-rs-static-method-privatename-identifier-alt.js
 language/expressions/class/elements/wrapped-in-sc-rs-static-method-privatename-identifier.js
 language/expressions/class/elements/wrapped-in-sc-rs-static-privatename-identifier-alt-by-classname.js
@@ -16837,7 +16871,18 @@ language/expressions/yield/rhs-regexp.js
 language/expressions/yield/rhs-template-middle.js
 language/expressions/yield/rhs-unresolvable.js
 language/expressions/yield/rhs-yield.js
+language/expressions/yield/star-array.js
 language/expressions/yield/star-in-iteration-stmt.js
+language/expressions/yield/star-rhs-iter-get-call-err.js
+language/expressions/yield/star-rhs-iter-get-call-non-obj.js
+language/expressions/yield/star-rhs-iter-nrml-next-call-err.js
+language/expressions/yield/star-rhs-iter-nrml-next-call-non-obj.js
+language/expressions/yield/star-rhs-iter-nrml-next-get-err.js
+language/expressions/yield/star-rhs-iter-nrml-next-invoke.js
+language/expressions/yield/star-rhs-iter-nrml-res-done-err.js
+language/expressions/yield/star-rhs-iter-nrml-res-value-err.js
+language/expressions/yield/star-rhs-iter-nrml-res-value-final.js
+language/expressions/yield/star-rhs-unresolvable.js
 language/expressions/yield/then-return.js
 language/expressions/yield/within-for.js
 language/function-code/10.4.3-1-1-s.js
@@ -20211,6 +20256,8 @@ language/statements/class/elements/after-same-line-gen-rs-privatename-identifier
 language/statements/class/elements/after-same-line-gen-rs-privatename-identifier.js
 language/statements/class/elements/after-same-line-gen-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-gen-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/after-same-line-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/after-same-line-gen-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-gen-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-gen-rs-static-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -20235,6 +20282,8 @@ language/statements/class/elements/after-same-line-method-rs-privatename-identif
 language/statements/class/elements/after-same-line-method-rs-privatename-identifier.js
 language/statements/class/elements/after-same-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-method-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/after-same-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/after-same-line-method-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-method-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-method-rs-static-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -20261,6 +20310,8 @@ language/statements/class/elements/after-same-line-static-async-gen-rs-static-as
 language/statements/class/elements/after-same-line-static-async-gen-rs-static-async-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-async-gen-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-async-gen-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/after-same-line-static-async-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/after-same-line-static-async-gen-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-async-gen-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-async-gen-rs-static-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-async-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -20287,6 +20338,8 @@ language/statements/class/elements/after-same-line-static-async-method-rs-static
 language/statements/class/elements/after-same-line-static-async-method-rs-static-async-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-async-method-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-async-method-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/after-same-line-static-async-method-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/after-same-line-static-async-method-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-async-method-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-async-method-rs-static-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-async-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -20311,6 +20364,8 @@ language/statements/class/elements/after-same-line-static-gen-rs-privatename-ide
 language/statements/class/elements/after-same-line-static-gen-rs-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-gen-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-gen-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/after-same-line-static-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/after-same-line-static-gen-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-gen-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-gen-rs-static-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -20335,6 +20390,8 @@ language/statements/class/elements/after-same-line-static-method-rs-privatename-
 language/statements/class/elements/after-same-line-static-method-rs-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-method-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-method-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/after-same-line-static-method-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/after-same-line-static-method-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-method-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/after-same-line-static-method-rs-static-method-privatename-identifier.js
 language/statements/class/elements/after-same-line-static-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -20452,6 +20509,8 @@ language/statements/class/elements/multiple-definitions-rs-privatename-identifie
 language/statements/class/elements/multiple-definitions-rs-privatename-identifier.js
 language/statements/class/elements/multiple-definitions-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/multiple-definitions-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/multiple-definitions-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/multiple-definitions-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/multiple-definitions-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/multiple-definitions-rs-static-method-privatename-identifier.js
 language/statements/class/elements/multiple-definitions-rs-static-privatename-identifier-alt-by-classname.js
@@ -20476,6 +20535,8 @@ language/statements/class/elements/multiple-stacked-definitions-rs-privatename-i
 language/statements/class/elements/multiple-stacked-definitions-rs-privatename-identifier.js
 language/statements/class/elements/multiple-stacked-definitions-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/multiple-stacked-definitions-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/multiple-stacked-definitions-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/multiple-stacked-definitions-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/multiple-stacked-definitions-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/multiple-stacked-definitions-rs-static-method-privatename-identifier.js
 language/statements/class/elements/multiple-stacked-definitions-rs-static-privatename-identifier-alt-by-classname.js
@@ -20536,6 +20597,8 @@ language/statements/class/elements/new-no-sc-line-method-rs-privatename-identifi
 language/statements/class/elements/new-no-sc-line-method-rs-privatename-identifier.js
 language/statements/class/elements/new-no-sc-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/new-no-sc-line-method-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/new-no-sc-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/new-no-sc-line-method-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/new-no-sc-line-method-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/new-no-sc-line-method-rs-static-method-privatename-identifier.js
 language/statements/class/elements/new-no-sc-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -20560,6 +20623,8 @@ language/statements/class/elements/new-sc-line-gen-rs-privatename-identifier-ini
 language/statements/class/elements/new-sc-line-gen-rs-privatename-identifier.js
 language/statements/class/elements/new-sc-line-gen-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/new-sc-line-gen-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/new-sc-line-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/new-sc-line-gen-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/new-sc-line-gen-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/new-sc-line-gen-rs-static-method-privatename-identifier.js
 language/statements/class/elements/new-sc-line-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -20584,6 +20649,8 @@ language/statements/class/elements/new-sc-line-method-rs-privatename-identifier-
 language/statements/class/elements/new-sc-line-method-rs-privatename-identifier.js
 language/statements/class/elements/new-sc-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/new-sc-line-method-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/new-sc-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/new-sc-line-method-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/new-sc-line-method-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/new-sc-line-method-rs-static-method-privatename-identifier.js
 language/statements/class/elements/new-sc-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -20681,6 +20748,8 @@ language/statements/class/elements/regular-definitions-rs-privatename-identifier
 language/statements/class/elements/regular-definitions-rs-privatename-identifier.js
 language/statements/class/elements/regular-definitions-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/regular-definitions-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/regular-definitions-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/regular-definitions-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/regular-definitions-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/regular-definitions-rs-static-method-privatename-identifier.js
 language/statements/class/elements/regular-definitions-rs-static-privatename-identifier-alt-by-classname.js
@@ -20707,6 +20776,8 @@ language/statements/class/elements/same-line-async-gen-rs-static-async-generator
 language/statements/class/elements/same-line-async-gen-rs-static-async-generator-method-privatename-identifier.js
 language/statements/class/elements/same-line-async-gen-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-async-gen-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/same-line-async-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/same-line-async-gen-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/same-line-async-gen-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-async-gen-rs-static-method-privatename-identifier.js
 language/statements/class/elements/same-line-async-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -20733,6 +20804,8 @@ language/statements/class/elements/same-line-async-method-rs-static-async-genera
 language/statements/class/elements/same-line-async-method-rs-static-async-generator-method-privatename-identifier.js
 language/statements/class/elements/same-line-async-method-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-async-method-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/same-line-async-method-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/same-line-async-method-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/same-line-async-method-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-async-method-rs-static-method-privatename-identifier.js
 language/statements/class/elements/same-line-async-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -20757,6 +20830,8 @@ language/statements/class/elements/same-line-gen-rs-privatename-identifier-initi
 language/statements/class/elements/same-line-gen-rs-privatename-identifier.js
 language/statements/class/elements/same-line-gen-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-gen-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/same-line-gen-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/same-line-gen-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/same-line-gen-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-gen-rs-static-method-privatename-identifier.js
 language/statements/class/elements/same-line-gen-rs-static-privatename-identifier-alt-by-classname.js
@@ -20781,6 +20856,8 @@ language/statements/class/elements/same-line-method-rs-privatename-identifier-in
 language/statements/class/elements/same-line-method-rs-privatename-identifier.js
 language/statements/class/elements/same-line-method-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-method-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/same-line-method-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/same-line-method-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/same-line-method-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/same-line-method-rs-static-method-privatename-identifier.js
 language/statements/class/elements/same-line-method-rs-static-privatename-identifier-alt-by-classname.js
@@ -21012,6 +21089,8 @@ language/statements/class/elements/wrapped-in-sc-rs-privatename-identifier-initi
 language/statements/class/elements/wrapped-in-sc-rs-privatename-identifier.js
 language/statements/class/elements/wrapped-in-sc-rs-static-async-method-privatename-identifier-alt.js
 language/statements/class/elements/wrapped-in-sc-rs-static-async-method-privatename-identifier.js
+language/statements/class/elements/wrapped-in-sc-rs-static-generator-method-privatename-identifier-alt.js
+language/statements/class/elements/wrapped-in-sc-rs-static-generator-method-privatename-identifier.js
 language/statements/class/elements/wrapped-in-sc-rs-static-method-privatename-identifier-alt.js
 language/statements/class/elements/wrapped-in-sc-rs-static-method-privatename-identifier.js
 language/statements/class/elements/wrapped-in-sc-rs-static-privatename-identifier-alt-by-classname.js
@@ -22627,6 +22706,10 @@ language/statements/for-of/throw.js
 language/statements/for-of/yield-from-catch.js
 language/statements/for-of/yield-from-finally.js
 language/statements/for-of/yield-from-try.js
+language/statements/for-of/yield-star-from-catch.js
+language/statements/for-of/yield-star-from-finally.js
+language/statements/for-of/yield-star-from-try.js
+language/statements/for-of/yield-star.js
 language/statements/for-of/yield.js
 language/statements/for/12.6.3_2-3-a-ii-1.js
 language/statements/for/12.6.3_2-3-a-ii-10.js
@@ -24561,10 +24644,14 @@ staging/sm/fields/await-identifier-module-1.js
 staging/sm/fields/await-identifier-module-2.js
 staging/sm/fields/scopes.js
 staging/sm/generators/create-function-parse-before-getprototype.js
+staging/sm/generators/delegating-yield-10.js
+staging/sm/generators/delegating-yield-12.js
+staging/sm/generators/delegating-yield-4.js
 staging/sm/generators/gen-with-call-obj.js
 staging/sm/generators/regress-366941.js
 staging/sm/generators/yield-error.js
 staging/sm/generators/yield-non-regexp.js
+staging/sm/generators/yield-star-iterator-primitive.js
 staging/sm/global/bug-320887.js
 staging/sm/global/direct-eval-but-not.js
 staging/sm/global/eval-native-callback-is-indirect.js

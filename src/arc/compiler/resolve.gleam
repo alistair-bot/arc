@@ -21,7 +21,7 @@ import arc/vm/opcode.{
   IrPopTry, IrPushConst, IrPushTry, IrPutBoxed, IrPutElem, IrPutEvalVar,
   IrPutField, IrPutGlobal, IrPutLocal, IrReturn, IrScopeGetVar, IrScopePutVar,
   IrScopeTypeofVar, IrSetupDerivedClass, IrSwap, IrThrow, IrTypeOf,
-  IrTypeofEvalVar, IrTypeofGlobal, IrUnaryOp, IrYield,
+  IrTypeofEvalVar, IrTypeofGlobal, IrUnaryOp, IrYield, IrYieldStar,
 }
 import arc/vm/value.{
   type EnvCapture, type FuncTemplate, type JsValue, FuncTemplate,
@@ -262,6 +262,8 @@ fn resolve_ops(
     [IrInitialYield, ..rest] ->
       resolve_ops(rest, labels, [opcode.InitialYield, ..acc])
     [IrYield, ..rest] -> resolve_ops(rest, labels, [opcode.Yield, ..acc])
+    [IrYieldStar, ..rest] ->
+      resolve_ops(rest, labels, [opcode.YieldStar, ..acc])
 
     // Async
     [IrAwait, ..rest] -> resolve_ops(rest, labels, [opcode.Await, ..acc])

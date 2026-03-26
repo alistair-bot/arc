@@ -17,7 +17,7 @@ import arc/vm/opcode.{
   IrJumpIfTrue, IrLabel, IrLeaveFinally, IrMakeClosure, IrNewObject, IrNewRegExp,
   IrObjectSpread, IrPop, IrPopTry, IrPushConst, IrPushTry, IrPutElem, IrPutField,
   IrReturn, IrScopeGetVar, IrScopePutVar, IrScopeTypeofVar, IrSetupDerivedClass,
-  IrSwap, IrThrow, IrTypeOf, IrUnaryOp, IrYield,
+  IrSwap, IrThrow, IrTypeOf, IrUnaryOp, IrYield, IrYieldStar,
 }
 import arc/vm/value.{
   type JsValue, Finite, JsBool, JsNull, JsNumber, JsString, JsUndefined,
@@ -105,6 +105,9 @@ pub opaque type Emitter {
     /// encountered. Propagated to CompiledChild so the compiler knows to
     /// box all locals in this function for direct eval access.
     has_eval_call: Bool,
+    /// True while emitting an async function body. Checked by yield* to
+    /// route to the async-delegation path (GetAsyncIterator + await).
+    is_async: Bool,
   )
 }
 
@@ -485,6 +488,7 @@ fn new_emitter() -> Emitter {
     pending_label: None,
     strict: False,
     has_eval_call: False,
+    is_async: False,
   )
 }
 
@@ -1124,6 +1128,7 @@ fn compile_function_body(
       ..new_emitter(),
       next_label: parent.next_label,
       strict: child_strict,
+      is_async:,
     )
 
   let e = emit_op(e, EnterScope(FunctionScope))
@@ -2161,19 +2166,27 @@ fn emit_expr(e: Emitter, expr: ast.Expression) -> Result(Emitter, EmitError) {
 
     // Yield expression (inside generator functions)
     ast.YieldExpression(argument, is_delegate) -> {
+      let e = case argument {
+        Some(arg) -> emit_expr(e, arg)
+        None -> Ok(push_const(e, JsUndefined))
+      }
+      use e <- result.try(e)
       case is_delegate {
-        True -> Error(Unsupported("yield* (delegate yield)"))
-        False -> {
-          let e = case argument {
-            Some(arg) -> {
-              use e <- result.try(emit_expr(e, arg))
-              Ok(e)
+        False -> Ok(emit_ir(e, IrYield))
+        True ->
+          case e.is_async {
+            // Async-generator yield* needs GetAsyncIterator + await on each
+            // step — not yet wired. Falls through the emit_stmts error-swallow
+            // so the generator just completes.
+            True -> Error(Unsupported("yield* in async generator"))
+            False -> {
+              // Sync yield* — get iterator, seed with undefined, self-looping
+              // YieldStar handles the rest. Leaves final result.value on stack.
+              let e = emit_ir(e, IrGetIterator)
+              let e = push_const(e, JsUndefined)
+              Ok(emit_ir(e, IrYieldStar))
             }
-            None -> Ok(push_const(e, JsUndefined))
           }
-          use e <- result.map(e)
-          emit_ir(e, IrYield)
-        }
       }
     }
 

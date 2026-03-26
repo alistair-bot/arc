@@ -1,6 +1,7 @@
 import arc/compiler
 import arc/module
 import arc/parser
+import arc/repl/examples
 import arc/vm/builtins
 import arc/vm/builtins/arc as builtins_arc
 import arc/vm/builtins/common.{type Builtins}
@@ -364,12 +365,45 @@ fn handle_repl_line(state: ReplState, line: String) -> option.Option(ReplState) 
     }
 
     "/help" -> {
-      io.println("    /clear - clear the console")
-      io.println("    /help  - show this message")
-      io.println("    /reset - reset the REPL state")
-      io.println("    /exit  - exit the REPL")
+      io.println("    /clear          - clear the console")
+      io.println("    /help           - show this message")
+      io.println("    /reset          - reset the REPL state")
+      io.println("    /examples [n]   - list or run built-in demos")
+      io.println("    /exit           - exit the REPL")
       Some(state)
     }
+
+    "/examples" -> {
+      examples.print_list()
+      Some(state)
+    }
+
+    "/examples " <> arg ->
+      case int.parse(string.trim(arg)) {
+        Error(Nil) -> {
+          io.println("Usage: `/examples <n>` (try `/examples` for the list)")
+          Some(state)
+        }
+        Ok(n) ->
+          case examples.get(n) {
+            None -> {
+              io.println(
+                "No example " <> int.to_string(n) <> ". Try `/examples`.",
+              )
+              Some(state)
+            }
+            Some(ex) -> {
+              examples.print_source(ex)
+              let #(new_state, result) = eval(state, ex.source)
+              case result {
+                Ok(_) -> Nil
+                Error(err) -> io.println(err)
+              }
+              io.println("")
+              Some(new_state)
+            }
+          }
+      }
 
     "" -> Some(state)
 

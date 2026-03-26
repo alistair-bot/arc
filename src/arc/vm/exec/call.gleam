@@ -1233,11 +1233,7 @@ pub fn call_native(
           let s =
             builtins_symbol.descriptive_string(id, state.symbol_descriptions)
           Ok(
-            State(
-              ..state,
-              stack: [JsString(s), ..rest_stack],
-              pc: state.pc + 1,
-            ),
+            State(..state, stack: [JsString(s), ..rest_stack], pc: state.pc + 1),
           )
         }
         [val, ..] ->

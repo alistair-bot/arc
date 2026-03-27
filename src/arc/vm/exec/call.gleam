@@ -1,4 +1,5 @@
 import arc/vm/builtins/arc as builtins_arc
+import arc/vm/builtins/console as builtins_console
 import arc/vm/builtins/array as builtins_array
 import arc/vm/builtins/boolean as builtins_boolean
 import arc/vm/builtins/common
@@ -1734,6 +1735,7 @@ pub fn dispatch_native(
     value.MathNative(n) -> builtins_math.dispatch(n, args, this, state)
     value.ErrorNative(n) -> builtins_error.dispatch(n, args, this, state)
     value.ArcNative(n) -> builtins_arc.dispatch(n, args, this, state)
+    value.ConsoleNative(n) -> builtins_console.dispatch(n, args, this, state)
     value.VmNative(value.ArcSpawn) ->
       realm.arc_spawn(args, state, execute_inner, call_native_fn, new_state_fn)
     value.VmNative(value.EvalScript) ->

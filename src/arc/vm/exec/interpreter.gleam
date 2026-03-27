@@ -220,6 +220,8 @@ pub fn new_state(
     call_depth: 0,
     event_loop:,
     eval_env: None,
+    console_counts: dict.new(),
+    console_timers: dict.new(),
   )
 }
 

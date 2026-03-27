@@ -1,5 +1,6 @@
 import arc/vm/builtins/arc as builtins_arc
 import arc/vm/builtins/array as builtins_array
+import arc/vm/builtins/console as builtins_console
 import arc/vm/builtins/async_generator as builtins_async_generator
 import arc/vm/builtins/boolean as builtins_boolean
 import arc/vm/builtins/common.{type Builtins, Builtins}
@@ -167,6 +168,9 @@ pub fn init(h: Heap) -> #(Heap, Builtins) {
   // Arc global — engine-specific utilities (Arc.peek, etc.)
   let #(h, arc) = builtins_arc.init(h, object_proto, function.prototype)
 
+  // Console global — WHATWG Console Standard
+  let #(h, console) = builtins_console.init(h, object_proto, function.prototype)
+
   // JSON global object
   let #(h, json) = builtins_json.init(h, object_proto, function.prototype)
 
@@ -273,6 +277,7 @@ pub fn init(h: Heap) -> #(Heap, Builtins) {
       async_generator:,
       symbol:,
       arc:,
+      console:,
       json:,
       reflect:,
       map:,
@@ -340,6 +345,7 @@ pub fn globals(b: Builtins, h: Heap) -> #(Heap, value.Ref) {
     Builtin("Promise", JsObject(b.promise.constructor)),
     Builtin("Symbol", JsObject(b.symbol)),
     Builtin("Arc", JsObject(b.arc)),
+    Builtin("console", JsObject(b.console)),
     Builtin("JSON", JsObject(b.json)),
     Builtin("Reflect", JsObject(b.reflect)),
     Builtin("Map", JsObject(b.map.constructor)),

@@ -174,6 +174,10 @@ pub type State {
     /// check here before global. Frame-local — saved to SavedFrame on call,
     /// restored on return. None for frames with no direct eval.
     eval_env: Option(Ref),
+    /// Console.count() label → count mapping. Persists across evals.
+    console_counts: dict.Dict(String, Int),
+    /// Console.time() label → start-time-ms mapping. Persists across evals.
+    console_timers: dict.Dict(String, Float),
   )
 }
 
@@ -192,6 +196,8 @@ pub fn merge_globals(
     job_queue: list.append(child.job_queue, extra_jobs),
     pending_receivers: child.pending_receivers,
     outstanding: child.outstanding,
+    console_counts: child.console_counts,
+    console_timers: child.console_timers,
   )
 }
 

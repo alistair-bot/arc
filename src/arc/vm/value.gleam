@@ -476,6 +476,23 @@ pub type ArcNativeFn {
   ArcPidToString
 }
 
+/// Console methods — WHATWG Console Standard.
+pub type ConsoleNativeFn {
+  ConsoleLog
+  ConsoleWarn
+  ConsoleError
+  ConsoleInfo
+  ConsoleDebug
+  ConsoleAssert
+  ConsoleClear
+  ConsoleCount
+  ConsoleCountReset
+  ConsoleTime
+  ConsoleTimeLog
+  ConsoleTimeEnd
+  ConsoleTrace
+}
+
 /// JSON methods — JSON.parse and JSON.stringify.
 pub type JsonNativeFn {
   JsonParse
@@ -640,6 +657,7 @@ pub type NativeFn {
   ArrayNative(ArrayNativeFn)
   ObjectNative(ObjectNativeFn)
   ArcNative(ArcNativeFn)
+  ConsoleNative(ConsoleNativeFn)
   JsonNative(JsonNativeFn)
   ReflectNative(ReflectNativeFn)
   MapNative(MapNativeFn)

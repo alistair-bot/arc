@@ -50,6 +50,7 @@ pub type Builtins {
     async_generator: GeneratorBuiltin,
     symbol: Ref,
     arc: Ref,
+    console: Ref,
     json: Ref,
     reflect: Ref,
     map: BuiltinType,

@@ -1,8 +1,8 @@
 import arc/vm/builtins/arc as builtins_arc
-import arc/vm/builtins/console as builtins_console
 import arc/vm/builtins/array as builtins_array
 import arc/vm/builtins/boolean as builtins_boolean
 import arc/vm/builtins/common
+import arc/vm/builtins/console as builtins_console
 import arc/vm/builtins/error as builtins_error
 import arc/vm/builtins/json as builtins_json
 import arc/vm/builtins/map as builtins_map

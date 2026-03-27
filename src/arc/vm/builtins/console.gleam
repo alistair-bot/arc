@@ -98,10 +98,7 @@ pub fn dispatch(
 
 /// console.log(...args)
 /// WHATWG Console Standard §1.2.1: Logger("log", args)
-fn log(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn log(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let #(state, parts) = stringify_args(args, state, [])
   io.println(string.join(parts, " "))
   #(state, Ok(JsUndefined))
@@ -109,10 +106,7 @@ fn log(
 
 /// console.warn(...args)
 /// WHATWG Console Standard §1.2.4: Logger("warn", args)
-fn warn(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn warn(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let #(state, parts) = stringify_args(args, state, [])
   io.println_error("warn: " <> string.join(parts, " "))
   #(state, Ok(JsUndefined))
@@ -131,10 +125,7 @@ fn error_(
 
 /// console.info(...args)
 /// WHATWG Console Standard §1.2.3: Logger("info", args)
-fn info(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn info(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let #(state, parts) = stringify_args(args, state, [])
   io.println(string.join(parts, " "))
   #(state, Ok(JsUndefined))
@@ -234,10 +225,7 @@ fn count_reset(
 
 /// console.time(label?)
 /// WHATWG Console Standard §1.4.1
-fn time(
-  args: List(JsValue),
-  state: State,
-) -> #(State, Result(JsValue, JsValue)) {
+fn time(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
   let label = get_label(args)
   let timers = state.console_timers
   case dict.has_key(timers, label) {

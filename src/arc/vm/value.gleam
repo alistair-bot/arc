@@ -1394,8 +1394,7 @@ pub fn refs_in_slot(slot: HeapSlot(ctx)) -> List(Ref) {
         ArrayIteratorObject(source:, ..) -> [source]
         MapObject(entries:, keys_rev:, keys_len: _) -> {
           // Trace refs in map values
-          let value_refs =
-            dict.values(entries) |> list.flat_map(refs_in_value)
+          let value_refs = dict.values(entries) |> list.flat_map(refs_in_value)
           // Trace refs in keys (object keys hold heap refs). Reconstruct
           // original JsValue via map_key_to_js — the -0→+0 normalization
           // doesn't affect ref tracing since numbers carry no refs.

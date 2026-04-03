@@ -9197,6 +9197,7 @@ language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings-with-and-w
 language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings-with-initializer.js
 language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings-without-and-with-initializer.js
 language/block-scope/syntax/for-in/disallow-multiple-lexical-bindings.js
+language/block-scope/syntax/for-in/mixed-values-in-iteration.js
 language/block-scope/syntax/function-declarations/in-statement-position-case-expression-statement-list.js
 language/block-scope/syntax/function-declarations/in-statement-position-default-statement-list.js
 language/block-scope/syntax/function-declarations/in-statement-position-do-statement-while-expression.js
@@ -17813,6 +17814,7 @@ language/module-code/namespace/internals/get-str-found-uninit.js
 language/module-code/namespace/internals/object-hasOwnProperty-binding-uninit.js
 language/module-code/namespace/internals/object-keys-binding-uninit.js
 language/module-code/namespace/internals/object-propertyIsEnumerable-binding-uninit.js
+language/module-code/namespace/internals/super-access-to-tdz-binding.js
 language/module-code/parse-err-decl-pos-export-arrow-function.js
 language/module-code/parse-err-decl-pos-export-block-stmt-list.js
 language/module-code/parse-err-decl-pos-export-block-stmt.js
@@ -23059,6 +23061,7 @@ language/statements/for/labelled-fn-stmt-expr.js
 language/statements/for/labelled-fn-stmt-let.js
 language/statements/for/labelled-fn-stmt-var.js
 language/statements/for/let-array-with-newline.js
+language/statements/for/scope-body-lex-boundary.js
 language/statements/for/scope-body-var-none.js
 language/statements/for/scope-head-lex-close.js
 language/statements/for/scope-head-var-none.js
@@ -23762,6 +23765,11 @@ language/statements/let/static-init-await-binding-invalid.js
 language/statements/let/syntax/escaped-let.js
 language/statements/let/syntax/identifier-let-allowed-as-lefthandside-expression-strict.js
 language/statements/let/syntax/identifier-let-disallowed-as-boundname.js
+language/statements/let/syntax/let-closure-inside-condition.js
+language/statements/let/syntax/let-closure-inside-initialization.js
+language/statements/let/syntax/let-closure-inside-next-expression.js
+language/statements/let/syntax/let-iteration-variable-is-freshly-allocated-for-each-iteration-multi-let-binding.js
+language/statements/let/syntax/let-iteration-variable-is-freshly-allocated-for-each-iteration-single-let-binding.js
 language/statements/let/syntax/let-let-declaration-split-across-two-lines.js
 language/statements/let/syntax/let-let-declaration-with-initializer-split-across-two-lines.js
 language/statements/let/syntax/let-newline-await-in-normal-function.js

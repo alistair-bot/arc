@@ -6,7 +6,7 @@ import { EditorView, keymap, placeholder } from '@codemirror/view';
 import { tags } from '@lezer/highlight';
 import * as Select from '@radix-ui/react-select';
 import { AnimatePresence, motion } from 'motion/react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from 'react';
 import gitExamples from 'virtual:examples';
 import { useAtomVM } from './use-atomvm';
 
@@ -217,11 +217,20 @@ export function Playground() {
 	const [expanded, setExpanded] = useState(false);
 	const nextId = useRef(0);
 	const editorRef = useRef<HTMLDivElement>(null);
+	const outputRef = useRef<HTMLPreElement>(null);
 	const viewRef = useRef<EditorView | null>(null);
 	const codeRef = useRef(code);
 	const runRef = useRef<() => void>(() => {});
 
 	if (running && !didRun) setDidRun(true);
+
+	useLayoutEffect(() => {
+		const el = outputRef.current;
+		if (!el) return;
+		const threshold = 32;
+		const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < threshold;
+		if (isAtBottom) el.scrollTop = el.scrollHeight;
+	}, [output]);
 
 	useEffect(() => {
 		if (!running) return;
@@ -433,6 +442,7 @@ export function Playground() {
 			<AnimatePresence>
 				{output.length > 0 && (
 					<motion.pre
+						ref={outputRef}
 						initial={{ opacity: 0 }}
 						animate={{ opacity: 1 }}
 						exit={{ height: 0, opacity: 0 }}

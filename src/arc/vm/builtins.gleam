@@ -110,79 +110,34 @@ pub fn init(h: Heap) -> #(Heap, Builtins) {
     builtins_iterator.init(h, iterator_proto, function.prototype)
 
   // %ArrayIteratorPrototype% — ES §23.1.5.2
-  let #(h, array_iter_methods) =
-    common.alloc_call_methods(h, function.prototype, [
-      #("next", value.ArrayIteratorNext, 0),
-    ])
   let #(h, array_iterator_proto) =
-    heap.alloc(
+    alloc_iterator_proto(
       h,
-      ObjectSlot(
-        kind: OrdinaryObject,
-        properties: common.named_props(array_iter_methods),
-        symbol_properties: [
-          #(
-            value.symbol_to_string_tag,
-            value.data(value.JsString("Array Iterator"))
-              |> value.configurable(),
-          ),
-        ],
-        elements: elements.new(),
-        prototype: Some(iterator_proto),
-        extensible: True,
-      ),
+      function.prototype,
+      iterator_proto,
+      value.ArrayIteratorNext,
+      "Array Iterator",
     )
-  let h = heap.root(h, array_iterator_proto)
 
   // %SetIteratorPrototype% — ES §24.2.5.2
-  let #(h, set_iter_methods) =
-    common.alloc_call_methods(h, function.prototype, [
-      #("next", value.SetIteratorNext, 0),
-    ])
   let #(h, set_iterator_proto) =
-    heap.alloc(
+    alloc_iterator_proto(
       h,
-      ObjectSlot(
-        kind: OrdinaryObject,
-        properties: common.named_props(set_iter_methods),
-        symbol_properties: [
-          #(
-            value.symbol_to_string_tag,
-            value.data(value.JsString("Set Iterator"))
-              |> value.configurable(),
-          ),
-        ],
-        elements: elements.new(),
-        prototype: Some(iterator_proto),
-        extensible: True,
-      ),
+      function.prototype,
+      iterator_proto,
+      value.SetIteratorNext,
+      "Set Iterator",
     )
-  let h = heap.root(h, set_iterator_proto)
 
   // %MapIteratorPrototype% — ES §24.1.5.2
-  let #(h, map_iter_methods) =
-    common.alloc_call_methods(h, function.prototype, [
-      #("next", value.MapIteratorNext, 0),
-    ])
   let #(h, map_iterator_proto) =
-    heap.alloc(
+    alloc_iterator_proto(
       h,
-      ObjectSlot(
-        kind: OrdinaryObject,
-        properties: common.named_props(map_iter_methods),
-        symbol_properties: [
-          #(
-            value.symbol_to_string_tag,
-            value.data(value.JsString("Map Iterator"))
-              |> value.configurable(),
-          ),
-        ],
-        elements: elements.new(),
-        prototype: Some(iterator_proto),
-        extensible: True,
-      ),
+      function.prototype,
+      iterator_proto,
+      value.MapIteratorNext,
+      "Map Iterator",
     )
-  let h = heap.root(h, map_iterator_proto)
 
   // Generator.prototype → %IteratorPrototype% → Object.prototype
   let #(h, generator) =
@@ -377,6 +332,35 @@ pub fn init(h: Heap) -> #(Heap, Builtins) {
       async_from_sync_iterator_proto:,
     ),
   )
+}
+
+fn alloc_iterator_proto(
+  h: Heap,
+  function_proto: value.Ref,
+  iterator_proto: value.Ref,
+  next: value.CallNativeFn,
+  tag: String,
+) -> #(Heap, value.Ref) {
+  let #(h, methods) =
+    common.alloc_call_methods(h, function_proto, [#("next", next, 0)])
+  let #(h, ref) =
+    heap.alloc(
+      h,
+      ObjectSlot(
+        kind: OrdinaryObject,
+        properties: common.named_props(methods),
+        symbol_properties: [
+          #(
+            value.symbol_to_string_tag,
+            value.data(value.JsString(tag)) |> value.configurable(),
+          ),
+        ],
+        elements: elements.new(),
+        prototype: Some(iterator_proto),
+        extensible: True,
+      ),
+    )
+  #(heap.root(h, ref), ref)
 }
 
 /// A global entry: name, JsValue, and how to wrap it as a property descriptor.

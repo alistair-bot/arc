@@ -226,15 +226,15 @@ fn parse_int(
     [] -> Ok(#("", state))
   }
   use str, state <- state.try_op(str_result)
-  // Steps 6-9: Determine radix R.
+  // Steps 6-9: Determine radix R via ToInt32(radix).
   // If R is 0, NaN, or Infinity, default to 10.
-  let radix = case args {
-    [_, r, ..] ->
-      case arg_to_int(r, 10) {
-        0 -> 10
-        n -> n
-      }
-    _ -> 10
+  let radix_val = case args {
+    [_, r, ..] -> coerce.unwrap_primitive_wrapper(state.heap, r)
+    _ -> JsUndefined
+  }
+  let radix = case arg_to_int(radix_val, 10) {
+    0 -> 10
+    n -> n
   }
   // Step 10: If radix is 10 or 16, check for "0x"/"0X" prefix.
   let has_hex_prefix =

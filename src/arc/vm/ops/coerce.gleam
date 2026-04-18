@@ -166,6 +166,55 @@ pub fn try_to_string(
   }
 }
 
+/// ES2024 §7.1.4 ToNumber with VM re-entry for ToPrimitive.
+/// For primitives, converts directly. For objects, calls ToPrimitive(number) first.
+pub fn js_to_number(
+  state: State,
+  val: JsValue,
+) -> Result(#(value.JsNum, State), #(JsValue, State)) {
+  case val {
+    JsObject(_) -> {
+      use #(prim, state) <- result.try(to_primitive(state, val, NumberHint))
+      js_to_number(state, prim)
+    }
+    other ->
+      case value.to_number(other) {
+        Ok(n) -> Ok(#(n, state))
+        Error(msg) -> thrown_type_error(state, msg)
+      }
+  }
+}
+
+/// CPS wrapper for js_to_number. Use with `use` syntax:
+///   use n, state <- coerce.try_to_number(state, val)
+pub fn try_to_number(
+  state: State,
+  val: JsValue,
+  cont: fn(value.JsNum, State) -> #(State, Result(b, JsValue)),
+) -> #(State, Result(b, JsValue)) {
+  case js_to_number(state, val) {
+    Ok(#(n, state)) -> cont(n, state)
+    Error(#(thrown, state)) -> #(state, Error(thrown))
+  }
+}
+
+/// Fast-path unwrap of primitive wrapper objects (Number/String/Boolean) to
+/// their [[PrimitiveValue]]. Returns `val` unchanged for any other input.
+/// Unlike full ToPrimitive this does NOT honor user-overridden valueOf or
+/// @@toPrimitive — use js_to_number/js_to_string for spec-exact coercion.
+pub fn unwrap_primitive_wrapper(h: Heap, val: JsValue) -> JsValue {
+  case val {
+    JsObject(ref) ->
+      case heap.read(h, ref) {
+        Some(ObjectSlot(kind: value.NumberObject(value: n), ..)) -> JsNumber(n)
+        Some(ObjectSlot(kind: value.StringObject(value: s), ..)) -> JsString(s)
+        Some(ObjectSlot(kind: value.BooleanObject(value: b), ..)) -> JsBool(b)
+        _ -> val
+      }
+    other -> other
+  }
+}
+
 /// ES2024 §13.10.2 InstanceofOperator ( V, target )
 pub fn js_instanceof(
   state: State,

@@ -390,6 +390,18 @@ fn underflow(
   Error(#(StepVmError(StackUnderflow(op)), JsUndefined, state.heap))
 }
 
+fn unimplemented(
+  state: State,
+  label: String,
+  op: Op,
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  Error(#(
+    StepVmError(Unimplemented(label <> ": " <> string.inspect(op))),
+    JsUndefined,
+    state.heap,
+  ))
+}
+
 /// Pop top of stack and jump to `target` if `condition(value)` is true,
 /// otherwise advance to next instruction.
 fn conditional_jump(
@@ -505,12 +517,7 @@ fn step(state: State, op: Op) -> Result(State, #(StepResult, JsValue, Heap)) {
     // Special
     CreateArguments | NewRegExp -> step_special(state, op)
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("opcode: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "opcode", op)
   }
 }
 
@@ -551,12 +558,7 @@ fn step_stack(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_stack: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_stack", op)
   }
 }
 
@@ -639,12 +641,7 @@ fn step_locals(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_locals: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_locals", op)
   }
 }
 
@@ -1021,12 +1018,7 @@ fn step_globals(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_globals: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_globals", op)
   }
 }
 
@@ -1083,58 +1075,9 @@ fn step_operators(
             // Add needs ToPrimitive for object operands (ES2024 §13.15.3)
             Add ->
               case left, right {
-                // Fast path: both primitives — no ToPrimitive needed
                 JsObject(_), _ | _, JsObject(_) ->
                   binop_add_with_to_primitive(state, left, right, rest)
-                // Both primitives — fast path, no ToPrimitive needed
-                JsString(a), JsString(b) ->
-                  Ok(
-                    State(
-                      ..state,
-                      stack: [JsString(a <> b), ..rest],
-                      pc: state.pc + 1,
-                    ),
-                  )
-                JsString(a), _ ->
-                  case coerce.js_to_string(state, right) {
-                    Ok(#(b, state)) ->
-                      Ok(
-                        State(
-                          ..state,
-                          stack: [JsString(a <> b), ..rest],
-                          pc: state.pc + 1,
-                        ),
-                      )
-                    Error(#(thrown, state)) ->
-                      Error(#(Thrown, thrown, state.heap))
-                  }
-                _, JsString(b) ->
-                  case coerce.js_to_string(state, left) {
-                    Ok(#(a, state)) ->
-                      Ok(
-                        State(
-                          ..state,
-                          stack: [JsString(a <> b), ..rest],
-                          pc: state.pc + 1,
-                        ),
-                      )
-                    Error(#(thrown, state)) ->
-                      Error(#(Thrown, thrown, state.heap))
-                  }
-                _, _ ->
-                  case operators.num_binop(left, right, operators.num_add) {
-                    Ok(result) ->
-                      Ok(
-                        State(
-                          ..state,
-                          stack: [result, ..rest],
-                          pc: state.pc + 1,
-                        ),
-                      )
-                    Error(msg) -> {
-                      state.throw_type_error(state, msg)
-                    }
-                  }
+                _, _ -> add_primitives(state, left, right, rest)
               }
             // Strict equality compares object references — never coerce.
             opcode.StrictEq | opcode.StrictNotEq ->
@@ -1182,12 +1125,7 @@ fn step_operators(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_operators: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_operators", op)
   }
 }
 
@@ -1412,12 +1350,7 @@ fn step_control_flow(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_control_flow: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_control_flow", op)
   }
 }
 
@@ -1864,12 +1797,7 @@ fn step_objects(
           )
       }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_objects: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_objects", op)
   }
 }
 
@@ -2054,12 +1982,7 @@ fn step_arrays(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_arrays: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_arrays", op)
   }
 }
 
@@ -2380,12 +2303,7 @@ fn step_calls(
       )
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_calls: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_calls", op)
   }
 }
 
@@ -2678,12 +2596,7 @@ fn step_iteration(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_iteration: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_iteration", op)
   }
 }
 
@@ -2752,12 +2665,7 @@ fn step_generators(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_generators: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_generators", op)
   }
 }
 
@@ -2842,12 +2750,7 @@ fn step_special(
       }
     }
 
-    _ ->
-      Error(#(
-        StepVmError(Unimplemented("step_special: " <> string.inspect(op))),
-        JsUndefined,
-        state.heap,
-      ))
+    _ -> unimplemented(state, "step_special", op)
   }
 }
 
@@ -3038,6 +2941,11 @@ fn do_call_super_dispatch(
         list.append(bound_args, args),
         rest_stack,
       )
+    // §20.4.1: Symbol has no [[Construct]]; super() into Symbol must throw.
+    Some(ObjectSlot(
+      kind: NativeFunction(value.Call(value.SymbolConstructor)),
+      ..,
+    )) -> state.throw_type_error(state, "Symbol is not a constructor")
     Some(ObjectSlot(kind: NativeFunction(native), ..)) -> {
       // Built-in parent (Array, Map, Error, …): per spec the result of
       // Construct(func, args, newTarget) becomes `this`. Arc's native ctors
@@ -3325,6 +3233,37 @@ fn unaryop_with_to_primitive(
   }
 }
 
+/// ES2024 §13.15.4 step 2–7: apply `+` to two already-primitive operands.
+fn add_primitives(
+  state: State,
+  lprim: JsValue,
+  rprim: JsValue,
+  rest: List(JsValue),
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  case lprim, rprim {
+    JsString(a), JsString(b) ->
+      Ok(State(..state, stack: [JsString(a <> b), ..rest], pc: state.pc + 1))
+    JsString(a), _ -> {
+      use #(b, state) <- result.map(
+        state.rethrow(coerce.js_to_string(state, rprim)),
+      )
+      State(..state, stack: [JsString(a <> b), ..rest], pc: state.pc + 1)
+    }
+    _, JsString(b) -> {
+      use #(a, state) <- result.map(
+        state.rethrow(coerce.js_to_string(state, lprim)),
+      )
+      State(..state, stack: [JsString(a <> b), ..rest], pc: state.pc + 1)
+    }
+    _, _ ->
+      case operators.num_binop(lprim, rprim, operators.num_add) {
+        Ok(result) ->
+          Ok(State(..state, stack: [result, ..rest], pc: state.pc + 1))
+        Error(msg) -> state.throw_type_error(state, msg)
+      }
+  }
+}
+
 fn binop_add_with_to_primitive(
   state: State,
   left: JsValue,
@@ -3337,29 +3276,7 @@ fn binop_add_with_to_primitive(
   use #(rprim, s2) <- result.try(
     state.rethrow(coerce.to_primitive(s1, right, coerce.DefaultHint)),
   )
-  case lprim, rprim {
-    JsString(a), JsString(b) ->
-      Ok(State(..s2, stack: [JsString(a <> b), ..rest], pc: state.pc + 1))
-    JsString(a), _ -> {
-      use #(b, s3) <- result.map(state.rethrow(coerce.js_to_string(s2, rprim)))
-      State(..s3, stack: [JsString(a <> b), ..rest], pc: state.pc + 1)
-    }
-    _, JsString(b) -> {
-      use #(a, s3) <- result.map(state.rethrow(coerce.js_to_string(s2, lprim)))
-      State(..s3, stack: [JsString(a <> b), ..rest], pc: state.pc + 1)
-    }
-    _, _ -> {
-      let a = operators.to_number_for_binop(lprim)
-      let b = operators.to_number_for_binop(rprim)
-      Ok(
-        State(
-          ..s2,
-          stack: [JsNumber(operators.num_add(a, b)), ..rest],
-          pc: state.pc + 1,
-        ),
-      )
-    }
-  }
+  add_primitives(s2, lprim, rprim, rest)
 }
 
 fn alloc_array_iterator(

@@ -13,9 +13,9 @@ import arc/vm/ops/object
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
   type IteratorHelperKind, type IteratorNativeFn, type JsValue, type Ref,
-  AccessorProperty, Dispatch, Finite, HelperDrop, HelperFilter, HelperFlatMap,
-  HelperMap, HelperTake, Infinity, IteratorConstructor, IteratorFrom,
-  IteratorHelperNext, IteratorHelperObject, IteratorHelperReturn, IteratorNative,
+  Dispatch, Finite, HelperDrop, HelperFilter, HelperFlatMap, HelperMap,
+  HelperTake, Infinity, IteratorConstructor, IteratorFrom, IteratorHelperNext,
+  IteratorHelperObject, IteratorHelperReturn, IteratorNative,
   IteratorProtoGetConstructor, IteratorProtoGetToStringTag,
   IteratorProtoSetConstructor, IteratorProtoSetToStringTag,
   IteratorPrototypeDrop, IteratorPrototypeEvery, IteratorPrototypeFilter,
@@ -30,6 +30,7 @@ import gleam/dict
 import gleam/int
 import gleam/list
 import gleam/option.{type Option, None, Some}
+import gleam/result
 
 // ============================================================================
 // Initialisation — wire up Iterator, %IteratorHelperPrototype%,
@@ -82,51 +83,21 @@ pub fn init(
   // §27.1.3.2 Iterator.prototype.constructor and §27.1.3.13 [@@toStringTag] are
   // accessor properties (SetterThatIgnoresPrototypeProperties), not data props.
   // init_type_on already wrote a data .constructor — overwrite with accessor.
-  let #(h, ctor_get) =
-    common.alloc_native_fn(
+  let #(h, ctor_accessor) =
+    common.alloc_get_set_accessor(
       h,
       function_proto,
       IteratorNative(IteratorProtoGetConstructor),
-      "get constructor",
-      0,
-    )
-  let #(h, ctor_set) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
       IteratorNative(IteratorProtoSetConstructor),
-      "set constructor",
-      1,
+      "constructor",
     )
-  let #(h, tag_get) =
-    common.alloc_native_fn(
+  let #(h, tag_accessor) =
+    common.alloc_get_set_accessor(
       h,
       function_proto,
       IteratorNative(IteratorProtoGetToStringTag),
-      "get [Symbol.toStringTag]",
-      0,
-    )
-  let #(h, tag_set) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
       IteratorNative(IteratorProtoSetToStringTag),
-      "set [Symbol.toStringTag]",
-      1,
-    )
-  let ctor_accessor =
-    AccessorProperty(
-      get: Some(JsObject(ctor_get)),
-      set: Some(JsObject(ctor_set)),
-      enumerable: False,
-      configurable: True,
-    )
-  let tag_accessor =
-    AccessorProperty(
-      get: Some(JsObject(tag_get)),
-      set: Some(JsObject(tag_set)),
-      enumerable: False,
-      configurable: True,
+      "[Symbol.toStringTag]",
     )
   let h =
     heap.update(h, iterator_proto, fn(slot) {
@@ -304,7 +275,7 @@ fn from(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue))
     True -> #(state, Ok(iter))
     False -> {
       let #(heap, ref) =
-        alloc_kind(
+        common.alloc_wrapper(
           state.heap,
           WrapForValidIteratorObject(iterated: iter, next_method: next),
           state.builtins.wrap_for_valid_iterator_proto,
@@ -430,7 +401,7 @@ fn alloc_helper(
   count: Int,
 ) -> #(State, Result(JsValue, JsValue)) {
   let #(heap, ref) =
-    alloc_kind(
+    common.alloc_wrapper(
       state.heap,
       IteratorHelperObject(
         kind:,
@@ -658,9 +629,9 @@ fn step_flat_map(
             Ok(#(mapped, state)) ->
               // GetIteratorFlattenable(mapped, reject-strings) — must be Object
               case open_inner(state, mapped) {
-                Error(#(state, thrown)) ->
+                #(state, Error(thrown)) ->
                   close_throw(mark_done(state, ref), underlying, thrown)
-                Ok(#(state, inner, inner_next)) -> {
+                #(state, Ok(#(inner, inner_next))) -> {
                   let state = write_inner(state, ref, inner, inner_next)
                   step_flat_map(
                     state,
@@ -685,49 +656,32 @@ fn step_flat_map(
 fn open_inner(
   state: State,
   mapped: JsValue,
-) -> Result(#(State, JsValue, JsValue), #(State, JsValue)) {
+) -> #(State, Result(#(JsValue, JsValue), JsValue)) {
   case mapped {
     JsObject(_) -> {
-      case object.get_symbol_value_of(state, mapped, value.symbol_iterator) {
-        Error(#(thrown, state)) -> Error(#(state, thrown))
-        Ok(#(method, state)) -> {
-          let iter_result = case method {
-            JsUndefined | JsNull -> Ok(#(mapped, state))
-            _ -> state.call(state, method, mapped, [])
-          }
-          case iter_result {
-            Error(#(thrown, state)) -> Error(#(state, thrown))
-            Ok(#(iter, state)) ->
-              case iter {
-                JsObject(_) ->
-                  case object.get_value_of(state, iter, Named("next")) {
-                    Error(#(thrown, state)) -> Error(#(state, thrown))
-                    Ok(#(inner_next, state)) -> Ok(#(state, iter, inner_next))
-                  }
-                _ -> {
-                  let #(state, r) =
-                    state.type_error(
-                      state,
-                      "flatMap callback result is not iterable",
-                    )
-                  case r {
-                    Error(e) -> Error(#(state, e))
-                    Ok(v) -> Error(#(state, v))
-                  }
-                }
-              }
-          }
+      use method, state <- state.try_op(object.get_symbol_value_of(
+        state,
+        mapped,
+        value.symbol_iterator,
+      ))
+      let iter_result = case method {
+        JsUndefined | JsNull -> Ok(#(mapped, state))
+        _ -> state.call(state, method, mapped, [])
+      }
+      use iter, state <- state.try_op(iter_result)
+      case iter {
+        JsObject(_) -> {
+          use inner_next, state <- state.try_op(object.get_value_of(
+            state,
+            iter,
+            Named("next"),
+          ))
+          #(state, Ok(#(iter, inner_next)))
         }
+        _ -> type_error_any(state, "flatMap callback result is not iterable")
       }
     }
-    _ -> {
-      let #(state, r) =
-        state.type_error(state, "flatMap callback returned a non-object")
-      case r {
-        Error(e) -> Error(#(state, e))
-        Ok(v) -> Error(#(state, v))
-      }
-    }
+    _ -> type_error_any(state, "flatMap callback returned a non-object")
   }
 }
 
@@ -737,10 +691,8 @@ fn open_inner(
 
 fn wrap_next(this: JsValue, state: State) -> #(State, Result(JsValue, JsValue)) {
   use iterated, next_method <- require_wrap(this, state)
-  case state.call(state, next_method, iterated, []) {
-    Ok(#(result, state)) -> #(state, Ok(result))
-    Error(#(thrown, state)) -> #(state, Error(thrown))
-  }
+  use result, state <- state.try_call(state, next_method, iterated, [])
+  #(state, Ok(result))
 }
 
 fn wrap_return(
@@ -755,16 +707,13 @@ fn wrap_return(
   ))
   case ret_fn {
     JsUndefined | JsNull -> create_iter_result(state, JsUndefined, True)
-    _ ->
-      case state.call(state, ret_fn, iterated, []) {
-        Error(#(thrown, state)) -> #(state, Error(thrown))
-        Ok(#(result, state)) ->
-          case result {
-            JsObject(_) -> #(state, Ok(result))
-            _ ->
-              state.type_error(state, "Iterator return result is not an object")
-          }
+    _ -> {
+      use result, state <- state.try_call(state, ret_fn, iterated, [])
+      case result {
+        JsObject(_) -> #(state, Ok(result))
+        _ -> state.type_error(state, "Iterator return result is not an object")
       }
+    }
   }
 }
 
@@ -894,22 +843,24 @@ fn bool_consumer(
   name: String,
 ) -> #(State, Result(JsValue, JsValue)) {
   use this, next, func, state <- consumer_with_callback(this, args, state, name)
-  bool_loop(state, this, next, func, 0, match_on)
+  let #(state, res) = predicate_loop(state, this, next, func, 0, match_on)
+  #(state, result.map(res, fn(m) { JsBool(option.is_some(m) == match_on) }))
 }
 
-fn bool_loop(
+/// Shared loop for some/every/find: step iterator, call predicate(v, idx),
+/// early-exit (closing iterator) when truthiness == match_on. Some(v) = matched.
+fn predicate_loop(
   state: State,
   iter: JsValue,
   next: JsValue,
   func: JsValue,
   counter: Int,
   match_on: Bool,
-) -> #(State, Result(JsValue, JsValue)) {
+) -> #(State, Result(Option(JsValue), JsValue)) {
   let #(state, step) = iterator_step_value(state, iter, next)
   case step {
     Error(thrown) -> #(state, Error(thrown))
-    // Ran to end without early exit: some → false, every → true.
-    Ok(None) -> #(state, Ok(JsBool(!match_on)))
+    Ok(None) -> #(state, Ok(None))
     Ok(Some(v)) -> {
       let idx = JsNumber(Finite(int.to_float(counter)))
       case state.call(state, func, JsUndefined, [v, idx]) {
@@ -920,10 +871,11 @@ fn bool_loop(
               let #(state, close_res) = iterator_close_normal(state, iter)
               case close_res {
                 Error(e) -> #(state, Error(e))
-                Ok(Nil) -> #(state, Ok(JsBool(match_on)))
+                Ok(Nil) -> #(state, Ok(Some(v)))
               }
             }
-            False -> bool_loop(state, iter, next, func, counter + 1, match_on)
+            False ->
+              predicate_loop(state, iter, next, func, counter + 1, match_on)
           }
       }
     }
@@ -941,38 +893,8 @@ fn find(
     state,
     "find",
   )
-  find_loop(state, this, next, func, 0)
-}
-
-fn find_loop(
-  state: State,
-  iter: JsValue,
-  next: JsValue,
-  func: JsValue,
-  counter: Int,
-) -> #(State, Result(JsValue, JsValue)) {
-  let #(state, step) = iterator_step_value(state, iter, next)
-  case step {
-    Error(thrown) -> #(state, Error(thrown))
-    Ok(None) -> #(state, Ok(JsUndefined))
-    Ok(Some(v)) -> {
-      let idx = JsNumber(Finite(int.to_float(counter)))
-      case state.call(state, func, JsUndefined, [v, idx]) {
-        Error(#(thrown, state)) -> close_throw(state, iter, thrown)
-        Ok(#(result, state)) ->
-          case value.is_truthy(result) {
-            True -> {
-              let #(state, close_res) = iterator_close_normal(state, iter)
-              case close_res {
-                Error(e) -> #(state, Error(e))
-                Ok(Nil) -> #(state, Ok(v))
-              }
-            }
-            False -> find_loop(state, iter, next, func, counter + 1)
-          }
-      }
-    }
-  }
+  let #(state, res) = predicate_loop(state, this, next, func, 0, True)
+  #(state, result.map(res, option.unwrap(_, JsUndefined)))
 }
 
 // ============================================================================
@@ -1128,14 +1050,7 @@ fn iterator_step_value(
             }
           }
         }
-        _ -> {
-          let #(state, r) =
-            state.type_error(state, "Iterator result is not an object")
-          case r {
-            Error(e) -> #(state, Error(e))
-            Ok(v) -> #(state, Error(v))
-          }
-        }
+        _ -> type_error_any(state, "Iterator result is not an object")
       }
   }
 }
@@ -1146,7 +1061,7 @@ fn close_throw(
   state: State,
   obj: JsValue,
   original: JsValue,
-) -> #(State, Result(JsValue, JsValue)) {
+) -> #(State, Result(a, JsValue)) {
   let #(state, _ignored) = call_return(state, obj)
   #(state, Error(original))
 }
@@ -1181,14 +1096,8 @@ fn iterator_close_normal(
   case call_return(state, obj) {
     #(state, Ok(JsUndefined)) -> #(state, Ok(Nil))
     #(state, Ok(JsObject(_))) -> #(state, Ok(Nil))
-    #(state, Ok(_other)) -> {
-      let #(state, r) =
-        state.type_error(state, "Iterator return result is not an object")
-      case r {
-        Error(e) -> #(state, Error(e))
-        Ok(v) -> #(state, Error(v))
-      }
-    }
+    #(state, Ok(_other)) ->
+      type_error_any(state, "Iterator return result is not an object")
     #(state, Error(thrown)) -> #(state, Error(thrown))
   }
 }
@@ -1197,17 +1106,17 @@ fn iterator_close_normal(
 /// Ok(JsUndefined) means "no return method" (so the not-an-object check is
 /// skipped). Ok(other) is the return method's result.
 fn call_return(state: State, obj: JsValue) -> #(State, Result(JsValue, JsValue)) {
-  case object.get_value_of(state, obj, Named("return")) {
-    Error(#(thrown, state)) -> #(state, Error(thrown))
-    Ok(#(ret_fn, state)) ->
-      case ret_fn {
-        JsUndefined | JsNull -> #(state, Ok(JsUndefined))
-        _ ->
-          case state.call(state, ret_fn, obj, []) {
-            Ok(#(result, state)) -> #(state, Ok(result))
-            Error(#(thrown, state)) -> #(state, Error(thrown))
-          }
-      }
+  use ret_fn, state <- state.try_op(object.get_value_of(
+    state,
+    obj,
+    Named("return"),
+  ))
+  case ret_fn {
+    JsUndefined | JsNull -> #(state, Ok(JsUndefined))
+    _ -> {
+      use result, state <- state.try_call(state, ret_fn, obj, [])
+      #(state, Ok(result))
+    }
   }
 }
 
@@ -1240,24 +1149,6 @@ fn create_iter_result(
       ),
     ])
   #(State(..state, heap:), Ok(JsObject(ref)))
-}
-
-fn alloc_kind(
-  h: Heap,
-  kind: value.ExoticKind(State),
-  proto: Ref,
-) -> #(Heap, Ref) {
-  heap.alloc(
-    h,
-    ObjectSlot(
-      kind:,
-      properties: dict.new(),
-      elements: elements.new(),
-      prototype: Some(proto),
-      symbol_properties: [],
-      extensible: True,
-    ),
-  )
 }
 
 /// Unwrap `this` as an Object ref or TypeError. CPS — `use ref <- ...`.
@@ -1361,6 +1252,13 @@ fn err_type(
   msg: String,
 ) -> Result(a, #(State, Result(JsValue, JsValue))) {
   Error(state.type_error(state, msg))
+}
+
+/// state.type_error but polymorphic in the Ok type — for callsites where the
+/// surrounding Result's Ok type isn't JsValue (so state.type_error won't unify).
+fn type_error_any(state: State, msg: String) -> #(State, Result(a, JsValue)) {
+  let #(heap, err) = common.make_type_error(state.heap, state.builtins, msg)
+  #(State(..state, heap:), Error(err))
 }
 
 /// Step the underlying iterator. If next() throws, mark the helper done and

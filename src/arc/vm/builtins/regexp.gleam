@@ -324,10 +324,8 @@ fn regexp_test(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use pattern, flags, ref, state <- require_regexp(this, state, "test")
-  let str = case args {
-    [JsString(s), ..] -> s
-    _ -> "undefined"
-  }
+  let arg = helpers.first_arg_or_undefined(args)
+  use str, state <- coerce.try_to_string(state, arg)
   let is_global_or_sticky =
     string.contains(flags, "g") || string.contains(flags, "y")
   case is_global_or_sticky {
@@ -355,10 +353,8 @@ fn regexp_exec(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use pattern, flags, ref, state <- require_regexp(this, state, "exec")
-  let str = case args {
-    [JsString(s), ..] -> s
-    _ -> "undefined"
-  }
+  let arg = helpers.first_arg_or_undefined(args)
+  use str, state <- coerce.try_to_string(state, arg)
   let is_global_or_sticky =
     string.contains(flags, "g") || string.contains(flags, "y")
   let offset = case is_global_or_sticky {

@@ -236,6 +236,29 @@ pub fn alloc_getters(
   })
 }
 
+/// Allocate a getter+setter native fn pair and return the AccessorProperty
+/// (non-enumerable, configurable). Getter arity 0 / "get <name>", setter
+/// arity 1 / "set <name>". Used for SetterThatIgnoresPrototypeProperties.
+pub fn alloc_get_set_accessor(
+  h: Heap(ctx),
+  function_proto: Ref,
+  get: NativeFn,
+  set: NativeFn,
+  name: String,
+) -> #(Heap(ctx), Property) {
+  let #(h, get_ref) = alloc_native_fn(h, function_proto, get, "get " <> name, 0)
+  let #(h, set_ref) = alloc_native_fn(h, function_proto, set, "set " <> name, 1)
+  #(
+    h,
+    AccessorProperty(
+      get: Some(JsObject(get_ref)),
+      set: Some(JsObject(set_ref)),
+      enumerable: False,
+      configurable: True,
+    ),
+  )
+}
+
 /// Batch allocate call-level native method objects (Function.call/apply/bind,
 /// Promise.then/catch, Generator.next/return/throw, etc.).
 pub fn alloc_call_methods(

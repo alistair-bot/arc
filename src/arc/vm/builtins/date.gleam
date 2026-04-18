@@ -584,10 +584,8 @@ fn args_to_time_value(
   args: List(JsValue),
   is_local: Bool,
 ) -> #(State, Result(JsNum, JsValue)) {
-  case args_to_nums(state, list.take(args, 7)) {
-    Error(#(e, st)) -> #(st, Error(e))
-    Ok(#(nums, st)) -> #(st, Ok(make_date_checked(pad_fields(nums), is_local)))
-  }
+  use nums, st <- state.try_op(args_to_nums(state, list.take(args, 7)))
+  #(st, Ok(make_date_checked(pad_fields(nums), is_local)))
 }
 
 /// Pad a fields list to length 7 with spec defaults.
@@ -616,10 +614,9 @@ fn date_parse(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case coerce.js_to_string(state, helpers.first_arg_or_undefined(args)) {
-    Error(#(e, st)) -> #(st, Error(e))
-    Ok(#(s, st)) -> #(st, Ok(JsNumber(parse_date_string(s))))
-  }
+  let arg = helpers.first_arg_or_undefined(args)
+  use s, st <- state.try_op(coerce.js_to_string(state, arg))
+  #(st, Ok(JsNumber(parse_date_string(s))))
 }
 
 /// ES2024 §21.4.3.4 Date.UTC ( year [, month [, date [, hours ...]]] )
@@ -698,14 +695,11 @@ fn date_set_time(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use ref, _ <- require_time_value(state, this, "setTime")
-  case to_number_state(state, helpers.first_arg_or_undefined(args)) {
-    Error(#(e, st)) -> #(st, Error(e))
-    Ok(#(n, st)) -> {
-      let tv = time_clip(n)
-      let st = set_this_time_value(st, ref, tv)
-      #(st, Ok(JsNumber(tv)))
-    }
-  }
+  let arg = helpers.first_arg_or_undefined(args)
+  use n, st <- state.try_op(to_number_state(state, arg))
+  let tv = time_clip(n)
+  let st = set_this_time_value(st, ref, tv)
+  #(st, Ok(JsNumber(tv)))
 }
 
 /// Shared setter. `first` is the first field index being set (0=year .. 6=ms),
@@ -726,24 +720,22 @@ fn date_set_field(
   use ref, tv <- require_time_value(state, this, "set")
   // Coerce supplied args (capped at max_args) to JsNum — full ToNumber so
   // valueOf side effects and abrupt completions are observed in order.
-  case args_to_nums(state, list.take(args, max_args)) {
-    Error(#(e, st)) -> #(st, Error(e))
-    Ok(#(new_nums, state)) ->
-      case compute_set_field(tv, first, new_nums, is_local) {
-        // Original [[DateValue]] was NaN (and this isn't setFullYear): per
-        // spec step "If t is NaN, return NaN" — early return WITHOUT
-        // writing back, so any side-effect setTime in valueOf is preserved.
-        None -> #(state, Ok(JsNumber(NaN)))
-        Some(result) -> {
-          // Per spec, if no argument was supplied the result is NaN.
-          let result = case args {
-            [] -> NaN
-            _ -> result
-          }
-          let state = set_this_time_value(state, ref, result)
-          #(state, Ok(JsNumber(result)))
-        }
+  let supplied = list.take(args, max_args)
+  use new_nums, state <- state.try_op(args_to_nums(state, supplied))
+  case compute_set_field(tv, first, new_nums, is_local) {
+    // Original [[DateValue]] was NaN (and this isn't setFullYear): per
+    // spec step "If t is NaN, return NaN" — early return WITHOUT
+    // writing back, so any side-effect setTime in valueOf is preserved.
+    None -> #(state, Ok(JsNumber(NaN)))
+    Some(result) -> {
+      // Per spec, if no argument was supplied the result is NaN.
+      let result = case args {
+        [] -> NaN
+        _ -> result
       }
+      let state = set_this_time_value(state, ref, result)
+      #(state, Ok(JsNumber(result)))
+    }
   }
 }
 
@@ -1301,42 +1293,40 @@ fn date_set_year(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use ref, tv <- require_time_value(state, this, "setYear")
-  case to_number_state(state, helpers.first_arg_or_undefined(args)) {
-    Error(#(e, st)) -> #(st, Error(e))
-    Ok(#(n, st)) ->
-      case n {
-        Finite(yf) -> {
-          let yi = value.float_to_int(yf)
-          let yi = case yi >= 0 && yi <= 99 {
-            True -> yi + 1900
-            False -> yi
-          }
-          // Base on local-time fields of current value; if NaN, t=+0 →
-          // Month 0, Date 1, all-zero time (NOT LocalTime(+0)).
-          let new_tv = case tv {
-            Finite(f) -> {
-              let b = get_date_fields(value.float_to_int(f), True)
-              make_date(
-                yi,
-                b.month,
-                b.date,
-                b.hours,
-                b.minutes,
-                b.seconds,
-                b.ms,
-                True,
-              )
-            }
-            _ -> make_date(yi, 0, 1, 0, 0, 0, 0, True)
-          }
-          let st = set_this_time_value(st, ref, new_tv)
-          #(st, Ok(JsNumber(new_tv)))
-        }
-        _ -> {
-          let st = set_this_time_value(st, ref, NaN)
-          #(st, Ok(JsNumber(NaN)))
-        }
+  let arg = helpers.first_arg_or_undefined(args)
+  use n, st <- state.try_op(to_number_state(state, arg))
+  case n {
+    Finite(yf) -> {
+      let yi = value.float_to_int(yf)
+      let yi = case yi >= 0 && yi <= 99 {
+        True -> yi + 1900
+        False -> yi
       }
+      // Base on local-time fields of current value; if NaN, t=+0 →
+      // Month 0, Date 1, all-zero time (NOT LocalTime(+0)).
+      let new_tv = case tv {
+        Finite(f) -> {
+          let b = get_date_fields(value.float_to_int(f), True)
+          make_date(
+            yi,
+            b.month,
+            b.date,
+            b.hours,
+            b.minutes,
+            b.seconds,
+            b.ms,
+            True,
+          )
+        }
+        _ -> make_date(yi, 0, 1, 0, 0, 0, 0, True)
+      }
+      let st = set_this_time_value(st, ref, new_tv)
+      #(st, Ok(JsNumber(new_tv)))
+    }
+    _ -> {
+      let st = set_this_time_value(st, ref, NaN)
+      #(st, Ok(JsNumber(NaN)))
+    }
   }
 }
 
@@ -1382,10 +1372,8 @@ fn run_ordinary_to_primitive(
   ref: Ref,
   hint: coerce.ToPrimitiveHint,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case coerce.ordinary_to_primitive(state, val, ref, hint) {
-    Ok(#(v, st)) -> #(st, Ok(v))
-    Error(#(e, st)) -> #(st, Error(e))
-  }
+  use v, st <- state.try_op(coerce.ordinary_to_primitive(state, val, ref, hint))
+  #(st, Ok(v))
 }
 
 /// ES2024 §21.4.4.37 Date.prototype.toJSON ( key )
@@ -1409,17 +1397,16 @@ fn date_to_json(
       let state = State(..state, heap:)
       let obj = JsObject(ref)
       // Step 2: ToPrimitive(O, number).
-      case coerce.to_primitive(state, obj, coerce.NumberHint) {
-        Error(#(e, st)) -> #(st, Error(e))
-        Ok(#(prim, st)) ->
-          case prim {
-            // Step 3: non-finite Number → return null.
-            JsNumber(NaN)
-            | JsNumber(value.Infinity)
-            | JsNumber(value.NegInfinity) -> #(st, Ok(JsNull))
-            // Step 4: Invoke(O, "toISOString").
-            _ -> invoke_to_iso_string(st, obj, ref)
-          }
+      let prim_r = coerce.to_primitive(state, obj, coerce.NumberHint)
+      use prim, st <- state.try_op(prim_r)
+      case prim {
+        // Step 3: non-finite Number → return null.
+        JsNumber(NaN) | JsNumber(value.Infinity) | JsNumber(value.NegInfinity) -> #(
+          st,
+          Ok(JsNull),
+        )
+        // Step 4: Invoke(O, "toISOString").
+        _ -> invoke_to_iso_string(st, obj, ref)
       }
     }
   }
@@ -1431,16 +1418,13 @@ fn invoke_to_iso_string(
   obj: JsValue,
   ref: Ref,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case ops_object.get_value(state, ref, value.Named("toISOString"), obj) {
-    Error(#(e, st)) -> #(st, Error(e))
-    Ok(#(method, st)) ->
-      case helpers.is_callable(st.heap, method) {
-        True ->
-          case state.call(st, method, obj, []) {
-            Ok(#(v, st)) -> #(st, Ok(v))
-            Error(#(e, st)) -> #(st, Error(e))
-          }
-        False -> state.type_error(st, "toISOString is not a function")
-      }
+  let lookup = ops_object.get_value(state, ref, value.Named("toISOString"), obj)
+  use method, st <- state.try_op(lookup)
+  case helpers.is_callable(st.heap, method) {
+    True -> {
+      use v, st <- state.try_call(st, method, obj, [])
+      #(st, Ok(v))
+    }
+    False -> state.type_error(st, "toISOString is not a function")
   }
 }

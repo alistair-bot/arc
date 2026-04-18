@@ -546,11 +546,13 @@ fn to_length_from_properties(
 ) -> Int {
   // Fast path: own data property
   case dict.get(properties, Named("length")) {
-    Ok(DataProperty(value: len_val, ..)) -> to_length(len_val)
+    Ok(DataProperty(value: len_val, ..)) ->
+      to_length(coerce.unwrap_primitive_wrapper(state.heap, len_val))
     // Accessor or missing: use full [[Get]] which handles getters + prototype chain
     _ ->
       case object.get_value(state, ref, Named("length"), JsObject(ref)) {
-        Ok(#(len_val, _state)) -> to_length(len_val)
+        Ok(#(len_val, _state)) ->
+          to_length(coerce.unwrap_primitive_wrapper(state.heap, len_val))
         Error(_) -> 0
       }
   }

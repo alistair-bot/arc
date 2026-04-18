@@ -1311,6 +1311,20 @@ pub fn call_native(
   }
 }
 
+/// Shared tail for `new String/Number/Boolean`: allocate the primitive
+/// wrapper exotic, push it, advance pc.
+fn push_wrapper(state: State, rest_stack: List(JsValue), kind, proto: Ref) {
+  let #(heap, ref) = common.alloc_wrapper(state.heap, kind, proto)
+  Ok(
+    State(
+      ..state,
+      heap:,
+      stack: [JsObject(ref), ..rest_stack],
+      pc: state.pc + 1,
+    ),
+  )
+}
+
 /// Full constructor invocation -- handles derived constructors, base constructors,
 /// bound functions, and native constructors. Extracted from the CallConstructor
 /// opcode handler so CallConstructorApply (spread path) can share it.
@@ -1419,22 +1433,13 @@ pub fn do_construct(
       }
       case coerced {
         Error(#(thrown, st)) -> Error(#(Thrown, thrown, st.heap))
-        Ok(#(s, state)) -> {
-          let #(heap, ref) =
-            common.alloc_wrapper(
-              state.heap,
-              value.StringObject(s),
-              state.builtins.string.prototype,
-            )
-          Ok(
-            State(
-              ..state,
-              heap:,
-              stack: [JsObject(ref), ..rest_stack],
-              pc: state.pc + 1,
-            ),
+        Ok(#(s, state)) ->
+          push_wrapper(
+            state,
+            rest_stack,
+            value.StringObject(s),
+            state.builtins.string.prototype,
           )
-        }
       }
     }
     // new Number(value) — §21.1.1.1: n = ToNumber(value), then return a
@@ -1450,19 +1455,11 @@ pub fn do_construct(
         [] -> value.Finite(0.0)
         [v, ..] -> builtins_math.to_number(v)
       }
-      let #(heap, ref) =
-        common.alloc_wrapper(
-          state.heap,
-          value.NumberObject(n),
-          state.builtins.number.prototype,
-        )
-      Ok(
-        State(
-          ..state,
-          heap:,
-          stack: [JsObject(ref), ..rest_stack],
-          pc: state.pc + 1,
-        ),
+      push_wrapper(
+        state,
+        rest_stack,
+        value.NumberObject(n),
+        state.builtins.number.prototype,
       )
     }
     // new Boolean(value) — §20.3.1.1: b = ToBoolean(value), then return a
@@ -1478,19 +1475,11 @@ pub fn do_construct(
         [] -> False
         [v, ..] -> value.is_truthy(v)
       }
-      let #(heap, ref) =
-        common.alloc_wrapper(
-          state.heap,
-          value.BooleanObject(b),
-          state.builtins.boolean.prototype,
-        )
-      Ok(
-        State(
-          ..state,
-          heap:,
-          stack: [JsObject(ref), ..rest_stack],
-          pc: state.pc + 1,
-        ),
+      push_wrapper(
+        state,
+        rest_stack,
+        value.BooleanObject(b),
+        state.builtins.boolean.prototype,
       )
     }
     Some(ObjectSlot(kind: NativeFunction(native), ..)) ->
@@ -1677,6 +1666,29 @@ fn extract_elements_loop(
   }
 }
 
+/// Allocate a {value, done} iterator-result object, push it, advance pc.
+fn push_iter_result(
+  state: State,
+  rest_stack: List(JsValue),
+  h: Heap,
+  val: JsValue,
+  done: Bool,
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  let #(h, result) =
+    generators.create_iterator_result(h, state.builtins, val, done)
+  Ok(State(..state, heap: h, stack: [result, ..rest_stack], pc: state.pc + 1))
+}
+
+fn iter_incompatible(
+  state: State,
+  tag: String,
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  state.throw_type_error(
+    state,
+    tag <> " Iterator next called on incompatible receiver",
+  )
+}
+
 /// ES §23.1.5.2.1 %ArrayIteratorPrototype%.next()
 fn call_array_iterator_next(
   state: State,
@@ -1693,25 +1705,9 @@ fn call_array_iterator_next(
             heap.read_array_like(state.heap, source)
             |> option.unwrap(#(0, elements.new()))
           case index >= length {
-            True -> {
-              let #(h, result) =
-                generators.create_iterator_result(
-                  state.heap,
-                  state.builtins,
-                  JsUndefined,
-                  True,
-                )
-              Ok(
-                State(
-                  ..state,
-                  heap: h,
-                  stack: [result, ..rest_stack],
-                  pc: state.pc + 1,
-                ),
-              )
-            }
+            True ->
+              push_iter_result(state, rest_stack, state.heap, JsUndefined, True)
             False -> {
-              let val = elements.get(elems, index)
               let h =
                 heap.write(
                   state.heap,
@@ -1721,30 +1717,19 @@ fn call_array_iterator_next(
                     kind: value.ArrayIteratorObject(source:, index: index + 1),
                   ),
                 )
-              let #(h, result) =
-                generators.create_iterator_result(h, state.builtins, val, False)
-              Ok(
-                State(
-                  ..state,
-                  heap: h,
-                  stack: [result, ..rest_stack],
-                  pc: state.pc + 1,
-                ),
+              push_iter_result(
+                state,
+                rest_stack,
+                h,
+                elements.get(elems, index),
+                False,
               )
             }
           }
         }
-        _ ->
-          state.throw_type_error(
-            state,
-            "Array Iterator next called on incompatible receiver",
-          )
+        _ -> iter_incompatible(state, "Array")
       }
-    _ ->
-      state.throw_type_error(
-        state,
-        "Array Iterator next called on incompatible receiver",
-      )
+    _ -> iter_incompatible(state, "Array")
   }
 }
 
@@ -1761,23 +1746,8 @@ fn call_set_iterator_next(
           ObjectSlot(kind: value.SetIteratorObject(remaining:, kind:), ..) as slot,
         ) ->
           case remaining {
-            [] -> {
-              let #(h, result) =
-                generators.create_iterator_result(
-                  state.heap,
-                  state.builtins,
-                  JsUndefined,
-                  True,
-                )
-              Ok(
-                State(
-                  ..state,
-                  heap: h,
-                  stack: [result, ..rest_stack],
-                  pc: state.pc + 1,
-                ),
-              )
-            }
+            [] ->
+              push_iter_result(state, rest_stack, state.heap, JsUndefined, True)
             [v, ..rest] -> {
               // For "entries" yield [v, v]; for "values"/"keys" yield v.
               let #(h, yielded) = case kind {
@@ -1801,34 +1771,12 @@ fn call_set_iterator_next(
                     kind: value.SetIteratorObject(remaining: rest, kind:),
                   ),
                 )
-              let #(h, result) =
-                generators.create_iterator_result(
-                  h,
-                  state.builtins,
-                  yielded,
-                  False,
-                )
-              Ok(
-                State(
-                  ..state,
-                  heap: h,
-                  stack: [result, ..rest_stack],
-                  pc: state.pc + 1,
-                ),
-              )
+              push_iter_result(state, rest_stack, h, yielded, False)
             }
           }
-        _ ->
-          state.throw_type_error(
-            state,
-            "Set Iterator next called on incompatible receiver",
-          )
+        _ -> iter_incompatible(state, "Set")
       }
-    _ ->
-      state.throw_type_error(
-        state,
-        "Set Iterator next called on incompatible receiver",
-      )
+    _ -> iter_incompatible(state, "Set")
   }
 }
 
@@ -1845,23 +1793,8 @@ fn call_map_iterator_next(
           ObjectSlot(kind: value.MapIteratorObject(remaining:, kind:), ..) as slot,
         ) ->
           case remaining {
-            [] -> {
-              let #(h, result) =
-                generators.create_iterator_result(
-                  state.heap,
-                  state.builtins,
-                  JsUndefined,
-                  True,
-                )
-              Ok(
-                State(
-                  ..state,
-                  heap: h,
-                  stack: [result, ..rest_stack],
-                  pc: state.pc + 1,
-                ),
-              )
-            }
+            [] ->
+              push_iter_result(state, rest_stack, state.heap, JsUndefined, True)
             [#(k, v), ..rest] -> {
               let #(h, yielded) = case kind {
                 value.MapIterKeys -> #(state.heap, k)
@@ -1885,34 +1818,12 @@ fn call_map_iterator_next(
                     kind: value.MapIteratorObject(remaining: rest, kind:),
                   ),
                 )
-              let #(h, result) =
-                generators.create_iterator_result(
-                  h,
-                  state.builtins,
-                  yielded,
-                  False,
-                )
-              Ok(
-                State(
-                  ..state,
-                  heap: h,
-                  stack: [result, ..rest_stack],
-                  pc: state.pc + 1,
-                ),
-              )
+              push_iter_result(state, rest_stack, h, yielded, False)
             }
           }
-        _ ->
-          state.throw_type_error(
-            state,
-            "Map Iterator next called on incompatible receiver",
-          )
+        _ -> iter_incompatible(state, "Map")
       }
-    _ ->
-      state.throw_type_error(
-        state,
-        "Map Iterator next called on incompatible receiver",
-      )
+    _ -> iter_incompatible(state, "Map")
   }
 }
 

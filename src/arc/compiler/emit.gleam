@@ -1803,8 +1803,10 @@ fn emit_expr(e: Emitter, expr: ast.Expression) -> Result(Emitter, EmitError) {
           Ok(e)
         }
         False -> {
-          // x++: get, dup (old value stays as result), add 1, store
+          // x++: get, ToNumeric (§13.4 step 2), dup (old value stays as
+          // result), add 1, store. Unary `+` is the ToNumber coercion.
           let e = emit_ir(e, IrScopeGetVar(name))
+          let e = emit_ir(e, IrUnaryOp(opcode.Pos))
           let e = emit_ir(e, IrDup)
           let e = push_const(e, one)
           let e = emit_ir(e, IrBinOp(bin_kind))
@@ -3703,279 +3705,97 @@ fn compile_derived_class(
   let e = emit_ir(e, IrSetupDerivedClass)
 
   // Step 4: Define instance methods on ctor.prototype (same as base class)
-  use e <- result.try(
-    list.try_fold(instance_methods, e, fn(e, method) {
-      case method {
-        ast.ClassMethod(
-          key: ast.Identifier(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          let e = emit_ir(e, IrGetField("prototype"))
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          Ok(emit_ir(e, IrPop))
-        }
-        ast.ClassMethod(
-          key: ast.StringExpression(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          let e = emit_ir(e, IrGetField("prototype"))
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Getter: get name() { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodGet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodGet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let e = emit_ir(e, IrGetField("prototype"))
-          let getter_child =
-            compile_function_body(
-              e,
-              Some("get " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, getter_idx) = add_child_function(e, getter_child)
-          let e = emit_ir(e, IrMakeClosure(getter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Getter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Setter: set name(v) { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodSet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodSet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let e = emit_ir(e, IrGetField("prototype"))
-          let setter_child =
-            compile_function_body(
-              e,
-              Some("set " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, setter_idx) = add_child_function(e, setter_child)
-          let e = emit_ir(e, IrMakeClosure(setter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Setter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Computed key or numeric-literal key (`[expr]() {}`, `0b10() {}`).
-        ast.ClassMethod(
-          key:,
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind:,
-          ..,
-        ) ->
-          emit_computed_class_method(
-            e,
-            key,
-            params,
-            body,
-            is_gen,
-            is_async,
-            kind,
-            True,
-          )
-        _ -> Error(Unsupported("class method with non-function value"))
-      }
-    }),
-  )
+  use e <- result.try(emit_class_methods(
+    e,
+    instance_methods,
+    on_prototype: True,
+  ))
 
   // Step 5: Define static methods on ctor
-  use e <- result.try(
-    list.try_fold(static_methods, e, fn(e, method) {
-      case method {
-        ast.ClassMethod(
-          key: ast.Identifier(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          Ok(emit_ir(e, IrPop))
-        }
-        ast.ClassMethod(
-          key: ast.StringExpression(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Static getter: static get name() { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodGet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodGet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let getter_child =
-            compile_function_body(
-              e,
-              Some("get " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, getter_idx) = add_child_function(e, getter_child)
-          let e = emit_ir(e, IrMakeClosure(getter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Getter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Static setter: static set name(v) { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodSet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodSet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let setter_child =
-            compile_function_body(
-              e,
-              Some("set " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, setter_idx) = add_child_function(e, setter_child)
-          let e = emit_ir(e, IrMakeClosure(setter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Setter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Computed key or numeric-literal key (`static [expr]() {}`, `static 0() {}`).
-        ast.ClassMethod(
-          key:,
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind:,
-          ..,
-        ) ->
-          emit_computed_class_method(
-            e,
-            key,
-            params,
-            body,
-            is_gen,
-            is_async,
-            kind,
-            False,
-          )
-        _ -> Error(Unsupported("class method with non-function value"))
-      }
-    }),
-  )
+  use e <- result.try(emit_class_methods(e, static_methods, on_prototype: False))
 
   // Stack: [ctor]
   Ok(e)
+}
+
+/// Define a list of class methods on the constructor (`on_prototype: False`)
+/// or on `ctor.prototype` (`on_prototype: True`). Stack: [ctor] → [ctor].
+fn emit_class_methods(
+  e: Emitter,
+  methods: List(ast.ClassElement),
+  on_prototype on_prototype: Bool,
+) -> Result(Emitter, EmitError) {
+  use e, method <- list.try_fold(methods, e)
+  case method {
+    // Static-string key: name() {}, "name"() {}, get name() {}, set name(v) {}
+    ast.ClassMethod(
+      key: ast.Identifier(name),
+      value: ast.FunctionExpression(_, params, body, is_gen, is_async),
+      kind:,
+      computed: False,
+      ..,
+    )
+    | ast.ClassMethod(
+        key: ast.StringExpression(name),
+        value: ast.FunctionExpression(_, params, body, is_gen, is_async),
+        kind:,
+        computed: False,
+        ..,
+      ) -> {
+      let #(fn_name, define_op) = case kind {
+        ast.MethodGet -> #(
+          "get " <> name,
+          IrDefineAccessor(name, opcode.Getter),
+        )
+        ast.MethodSet -> #(
+          "set " <> name,
+          IrDefineAccessor(name, opcode.Setter),
+        )
+        // MethodConstructor is stripped by classify_class_body; treat as method.
+        ast.MethodMethod | ast.MethodConstructor -> #(
+          name,
+          IrDefineMethod(name),
+        )
+      }
+      let e = emit_ir(e, IrDup)
+      let e = case on_prototype {
+        True -> emit_ir(e, IrGetField("prototype"))
+        False -> e
+      }
+      let child =
+        compile_function_body(
+          e,
+          Some(fn_name),
+          params,
+          body,
+          False,
+          is_gen,
+          is_async,
+        )
+      let #(e, idx) = add_child_function(e, child)
+      let e = emit_ir(e, IrMakeClosure(idx))
+      let e = emit_ir(e, define_op)
+      Ok(emit_ir(e, IrPop))
+    }
+    // Computed key or numeric-literal key (`[expr]() {}`, `0b10() {}`).
+    ast.ClassMethod(
+      key:,
+      value: ast.FunctionExpression(_, params, body, is_gen, is_async),
+      kind:,
+      ..,
+    ) ->
+      emit_computed_class_method(
+        e,
+        key,
+        params,
+        body,
+        is_gen,
+        is_async,
+        kind,
+        on_prototype,
+      )
+    _ -> Error(Unsupported("class method with non-function value"))
+  }
 }
 
 /// Computed-key (or numeric-literal-key) class method/accessor.
@@ -4073,285 +3893,14 @@ fn compile_base_class(
   // Stack: [ctor]
 
   // Step 2: Define instance methods on ctor.prototype
-  use e <- result.try(
-    list.try_fold(instance_methods, e, fn(e, method) {
-      case method {
-        ast.ClassMethod(
-          key: ast.Identifier(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          // Stack: [ctor, ctor]
-          let e = emit_ir(e, IrGetField("prototype"))
-          // Stack: [ctor, proto]
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          // Stack: [ctor, proto, method_fn]
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          // Stack: [ctor, proto]
-          Ok(emit_ir(e, IrPop))
-          // Stack: [ctor]
-        }
-        ast.ClassMethod(
-          key: ast.StringExpression(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          let e = emit_ir(e, IrGetField("prototype"))
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Getter: get name() { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodGet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodGet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let e = emit_ir(e, IrGetField("prototype"))
-          let getter_child =
-            compile_function_body(
-              e,
-              Some("get " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, getter_idx) = add_child_function(e, getter_child)
-          let e = emit_ir(e, IrMakeClosure(getter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Getter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Setter: set name(v) { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodSet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodSet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let e = emit_ir(e, IrGetField("prototype"))
-          let setter_child =
-            compile_function_body(
-              e,
-              Some("set " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, setter_idx) = add_child_function(e, setter_child)
-          let e = emit_ir(e, IrMakeClosure(setter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Setter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Computed key or numeric-literal key (`[expr]() {}`, `0b10() {}`).
-        ast.ClassMethod(
-          key:,
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind:,
-          ..,
-        ) ->
-          emit_computed_class_method(
-            e,
-            key,
-            params,
-            body,
-            is_gen,
-            is_async,
-            kind,
-            True,
-          )
-        _ -> Error(Unsupported("class method with non-function value"))
-      }
-    }),
-  )
+  use e <- result.try(emit_class_methods(
+    e,
+    instance_methods,
+    on_prototype: True,
+  ))
 
   // Step 3: Define static methods on ctor
-  use e <- result.try(
-    list.try_fold(static_methods, e, fn(e, method) {
-      case method {
-        ast.ClassMethod(
-          key: ast.Identifier(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          // Stack: [ctor, ctor]
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          // Stack: [ctor, ctor, method_fn]
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          // Stack: [ctor, ctor]
-          Ok(emit_ir(e, IrPop))
-          // Stack: [ctor]
-        }
-        ast.ClassMethod(
-          key: ast.StringExpression(method_name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodMethod,
-          computed: False,
-          ..,
-        ) -> {
-          let e = emit_ir(e, IrDup)
-          let method_child =
-            compile_function_body(
-              e,
-              Some(method_name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, method_idx) = add_child_function(e, method_child)
-          let e = emit_ir(e, IrMakeClosure(method_idx))
-          let e = emit_ir(e, IrDefineMethod(method_name))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Static getter: static get name() { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodGet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodGet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let getter_child =
-            compile_function_body(
-              e,
-              Some("get " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, getter_idx) = add_child_function(e, getter_child)
-          let e = emit_ir(e, IrMakeClosure(getter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Getter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Static setter: static set name(v) { ... }
-        ast.ClassMethod(
-          key: ast.Identifier(name),
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind: ast.MethodSet,
-          computed: False,
-          ..,
-        )
-        | ast.ClassMethod(
-            key: ast.StringExpression(name),
-            value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-            kind: ast.MethodSet,
-            computed: False,
-            ..,
-          ) -> {
-          let e = emit_ir(e, IrDup)
-          let setter_child =
-            compile_function_body(
-              e,
-              Some("set " <> name),
-              params,
-              body,
-              False,
-              is_gen,
-              is_async,
-            )
-          let #(e, setter_idx) = add_child_function(e, setter_child)
-          let e = emit_ir(e, IrMakeClosure(setter_idx))
-          let e = emit_ir(e, IrDefineAccessor(name, opcode.Setter))
-          Ok(emit_ir(e, IrPop))
-        }
-        // Computed key or numeric-literal key (`static [expr]() {}`, `static 0() {}`).
-        ast.ClassMethod(
-          key:,
-          value: ast.FunctionExpression(_, params, body, is_gen, is_async),
-          kind:,
-          ..,
-        ) ->
-          emit_computed_class_method(
-            e,
-            key,
-            params,
-            body,
-            is_gen,
-            is_async,
-            kind,
-            False,
-          )
-        _ -> Error(Unsupported("class method with non-function value"))
-      }
-    }),
-  )
+  use e <- result.try(emit_class_methods(e, static_methods, on_prototype: False))
 
   // Stack: [ctor]
   Ok(e)

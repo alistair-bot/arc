@@ -198,17 +198,7 @@ fn alloc_map(
   keys_rev: List(MapKey),
   keys_len: Int,
 ) -> #(Heap, Ref) {
-  heap.alloc(
-    heap,
-    ObjectSlot(
-      kind: MapObject(entries:, keys_rev:, keys_len:),
-      properties: dict.new(),
-      elements: elements.new(),
-      prototype: Some(proto),
-      symbol_properties: [],
-      extensible: True,
-    ),
-  )
+  common.alloc_wrapper(heap, MapObject(entries:, keys_rev:, keys_len:), proto)
 }
 
 /// Simplified AddEntriesFromIterable — handles array of [key, value] pairs.
@@ -610,16 +600,10 @@ fn map_iterator(
       dict.get(entries, k) |> result.map(fn(v) { #(value.map_key_to_js(k), v) })
     })
   let #(heap, ref) =
-    heap.alloc(
+    common.alloc_wrapper(
       state.heap,
-      ObjectSlot(
-        kind: value.MapIteratorObject(remaining: snapshot, kind:),
-        properties: dict.new(),
-        elements: elements.new(),
-        prototype: Some(state.builtins.map_iterator_proto),
-        symbol_properties: [],
-        extensible: True,
-      ),
+      value.MapIteratorObject(remaining: snapshot, kind:),
+      state.builtins.map_iterator_proto,
     )
   #(State(..state, heap:), Ok(JsObject(ref)))
 }

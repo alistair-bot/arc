@@ -119,7 +119,7 @@ pub fn dispatch(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   case native {
-    SetConstructor(proto:) -> construct(proto, args, state)
+    SetConstructor(_) -> construct(args, state)
     SetPrototypeAdd -> set_add(this, args, state)
     SetPrototypeHas -> set_has(this, args, state)
     SetPrototypeDelete -> set_delete(this, args, state)
@@ -141,7 +141,6 @@ pub fn dispatch(
 
 /// ES2024 §24.2.1.1 Set ( [ iterable ] )
 fn construct(
-  set_proto: Ref,
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
@@ -156,32 +155,7 @@ fn construct(
       |> option.unwrap([])
     _ -> []
   }
-
-  // Build data dict and keys list
-  let #(data, keys) =
-    list.fold(initial_values, #(dict.new(), []), fn(acc, val) {
-      let #(d, ks) = acc
-      let key = value.js_to_map_key(val)
-      case dict.has_key(d, key) {
-        True -> #(dict.insert(d, key, val), ks)
-        False -> #(dict.insert(d, key, val), [key, ..ks])
-      }
-    })
-  // keys accumulated via prepend = reverse insertion order, which is our storage invariant
-
-  let #(heap, ref) =
-    heap.alloc(
-      state.heap,
-      ObjectSlot(
-        kind: SetObject(data:, keys:),
-        properties: dict.new(),
-        elements: elements.new(),
-        prototype: Some(set_proto),
-        symbol_properties: [],
-        extensible: True,
-      ),
-    )
-  #(State(..state, heap:), Ok(JsObject(ref)))
+  alloc_new_set_from_values(state, initial_values)
 }
 
 /// Read elements from array into a list.
@@ -505,16 +479,10 @@ fn alloc_set_iterator(
   kind: value.SetIterKind,
 ) -> #(State, Result(JsValue, JsValue)) {
   let #(heap, ref) =
-    heap.alloc(
+    common.alloc_wrapper(
       state.heap,
-      ObjectSlot(
-        kind: value.SetIteratorObject(remaining:, kind:),
-        properties: dict.new(),
-        elements: elements.new(),
-        prototype: Some(state.builtins.set_iterator_proto),
-        symbol_properties: [],
-        extensible: True,
-      ),
+      value.SetIteratorObject(remaining:, kind:),
+      state.builtins.set_iterator_proto,
     )
   #(State(..state, heap:), Ok(JsObject(ref)))
 }
@@ -526,16 +494,10 @@ fn alloc_new_set(
   keys: List(MapKey),
 ) -> #(State, Result(JsValue, JsValue)) {
   let #(heap, ref) =
-    heap.alloc(
+    common.alloc_wrapper(
       state.heap,
-      ObjectSlot(
-        kind: SetObject(data:, keys:),
-        properties: dict.new(),
-        elements: elements.new(),
-        prototype: Some(state.builtins.set.prototype),
-        symbol_properties: [],
-        extensible: True,
-      ),
+      SetObject(data:, keys:),
+      state.builtins.set.prototype,
     )
   #(State(..state, heap:), Ok(JsObject(ref)))
 }

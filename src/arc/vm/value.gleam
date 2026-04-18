@@ -1397,6 +1397,25 @@ fn indent(lines: List(List(String)), indent: Int) -> String {
   }
 }
 
+fn property_debug_lines(property: Property) -> List(List(String)) {
+  case property {
+    DataProperty(value:, writable:, enumerable:, configurable:) -> [
+      [],
+      ["value:", string.inspect(value)],
+      ["writable:", bool.to_string(writable)],
+      ["enumerable:", bool.to_string(enumerable)],
+      ["configurable:", bool.to_string(configurable)],
+    ]
+    AccessorProperty(get:, set:, enumerable:, configurable:) -> [
+      [],
+      ["get:", string.inspect(get)],
+      ["set:", string.inspect(set)],
+      ["enumerable:", bool.to_string(enumerable)],
+      ["configurable:", bool.to_string(configurable)],
+    ]
+  }
+}
+
 // will probably get rid of this function or move it and remake it.s
 pub fn heap_slot_to_string(slot: HeapSlot(ctx)) -> String {
   case slot {
@@ -1420,23 +1439,7 @@ pub fn heap_slot_to_string(slot: HeapSlot(ctx)) -> String {
               [
                 [
                   key_to_string(key) <> ":",
-                  case property {
-                    DataProperty(value:, writable:, enumerable:, configurable:) -> [
-                      [],
-                      ["value:", string.inspect(value)],
-                      ["writable:", bool.to_string(writable)],
-                      ["enumerable:", bool.to_string(enumerable)],
-                      ["configurable:", bool.to_string(configurable)],
-                    ]
-                    AccessorProperty(get:, set:, enumerable:, configurable:) -> [
-                      [],
-                      ["get:", string.inspect(get)],
-                      ["set:", string.inspect(set)],
-                      ["enumerable:", bool.to_string(enumerable)],
-                      ["configurable:", bool.to_string(configurable)],
-                    ]
-                  }
-                    |> indent(4),
+                  property_debug_lines(property) |> indent(4),
                 ],
                 ..acc
               ]
@@ -1453,23 +1456,7 @@ pub fn heap_slot_to_string(slot: HeapSlot(ctx)) -> String {
               [
                 [
                   string.inspect(key),
-                  case property {
-                    DataProperty(value:, writable:, enumerable:, configurable:) -> [
-                      [],
-                      ["value:", string.inspect(value)],
-                      ["writable:", bool.to_string(writable)],
-                      ["enumerable:", bool.to_string(enumerable)],
-                      ["configurable:", bool.to_string(configurable)],
-                    ]
-                    AccessorProperty(get:, set:, enumerable:, configurable:) -> [
-                      [],
-                      ["get:", string.inspect(get)],
-                      ["set:", string.inspect(set)],
-                      ["enumerable:", bool.to_string(enumerable)],
-                      ["configurable:", bool.to_string(configurable)],
-                    ]
-                  }
-                    |> indent(4),
+                  property_debug_lines(property) |> indent(4),
                 ],
                 ..acc
               ]
@@ -1502,6 +1489,30 @@ fn refs_in_value(value: JsValue) -> List(Ref) {
     | JsBigInt(_)
     | JsUninitialized -> []
   }
+}
+
+fn refs_in_saved_frame(
+  env_ref: Ref,
+  saved_locals: TupleArray(JsValue),
+  saved_stack: List(JsValue),
+  saved_finally_stack: List(SavedFinallyCompletion),
+  saved_this: JsValue,
+  saved_callee_ref: Option(Ref),
+) -> List(Ref) {
+  list.flatten([
+    [env_ref],
+    tuple_array.to_list(saved_locals) |> list.flat_map(refs_in_value),
+    list.flat_map(saved_stack, refs_in_value),
+    list.flat_map(saved_finally_stack, fn(fc) {
+      case fc {
+        SavedThrowCompletion(value:) | SavedReturnCompletion(value:) ->
+          refs_in_value(value)
+        SavedNormalCompletion -> []
+      }
+    }),
+    refs_in_value(saved_this),
+    option.map(saved_callee_ref, list.wrap) |> option.unwrap([]),
+  ])
 }
 
 /// Extract all refs reachable from a heap slot by walking its JsValues.
@@ -1675,24 +1686,15 @@ pub fn refs_in_slot(slot: HeapSlot(ctx)) -> List(Ref) {
       saved_this:,
       saved_callee_ref:,
       ..,
-    ) -> {
-      let finally_refs =
-        list.flat_map(saved_finally_stack, fn(fc) {
-          case fc {
-            SavedThrowCompletion(value:) -> refs_in_value(value)
-            SavedReturnCompletion(value:) -> refs_in_value(value)
-            SavedNormalCompletion -> []
-          }
-        })
-      list.flatten([
-        [env_ref],
-        tuple_array.to_list(saved_locals) |> list.flat_map(refs_in_value),
-        list.flat_map(saved_stack, refs_in_value),
-        finally_refs,
-        refs_in_value(saved_this),
-        option.map(saved_callee_ref, list.wrap) |> option.unwrap([]),
-      ])
-    }
+    ) ->
+      refs_in_saved_frame(
+        env_ref,
+        saved_locals,
+        saved_stack,
+        saved_finally_stack,
+        saved_this,
+        saved_callee_ref,
+      )
     AsyncFunctionSlot(
       promise_data_ref:,
       resolve:,
@@ -1704,27 +1706,20 @@ pub fn refs_in_slot(slot: HeapSlot(ctx)) -> List(Ref) {
       saved_this:,
       saved_callee_ref:,
       ..,
-    ) -> {
-      let finally_refs =
-        list.flat_map(saved_finally_stack, fn(fc) {
-          case fc {
-            SavedThrowCompletion(value:) -> refs_in_value(value)
-            SavedReturnCompletion(value:) -> refs_in_value(value)
-            SavedNormalCompletion -> []
-          }
-        })
+    ) ->
       list.flatten([
         [promise_data_ref],
         refs_in_value(resolve),
         refs_in_value(reject),
-        [env_ref],
-        tuple_array.to_list(saved_locals) |> list.flat_map(refs_in_value),
-        list.flat_map(saved_stack, refs_in_value),
-        finally_refs,
-        refs_in_value(saved_this),
-        option.map(saved_callee_ref, list.wrap) |> option.unwrap([]),
+        refs_in_saved_frame(
+          env_ref,
+          saved_locals,
+          saved_stack,
+          saved_finally_stack,
+          saved_this,
+          saved_callee_ref,
+        ),
       ])
-    }
     AsyncGeneratorSlot(
       queue:,
       env_ref:,
@@ -1734,33 +1729,24 @@ pub fn refs_in_slot(slot: HeapSlot(ctx)) -> List(Ref) {
       saved_this:,
       saved_callee_ref:,
       ..,
-    ) -> {
-      let finally_refs =
-        list.flat_map(saved_finally_stack, fn(fc) {
-          case fc {
-            SavedThrowCompletion(value:) -> refs_in_value(value)
-            SavedReturnCompletion(value:) -> refs_in_value(value)
-            SavedNormalCompletion -> []
-          }
-        })
-      let queue_refs =
+    ) ->
+      list.flatten([
         list.flat_map(queue, fn(r) {
           list.flatten([
             refs_in_value(r.value),
             refs_in_value(r.resolve),
             refs_in_value(r.reject),
           ])
-        })
-      list.flatten([
-        queue_refs,
-        [env_ref],
-        tuple_array.to_list(saved_locals) |> list.flat_map(refs_in_value),
-        list.flat_map(saved_stack, refs_in_value),
-        finally_refs,
-        refs_in_value(saved_this),
-        option.map(saved_callee_ref, list.wrap) |> option.unwrap([]),
+        }),
+        refs_in_saved_frame(
+          env_ref,
+          saved_locals,
+          saved_stack,
+          saved_finally_stack,
+          saved_this,
+          saved_callee_ref,
+        ),
       ])
-    }
     RealmSlot(
       global_object:,
       lexical_globals:,

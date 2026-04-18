@@ -777,18 +777,17 @@ fn string_replace_all(
             "String.prototype.replaceAll called with a non-global RegExp argument",
           )
         True ->
-          // Delegate to Symbol.replace
+          // Delegate to Symbol.replace — pass the original `this` (O), not the
+          // coerced string (§22.1.3.19 step 2.d.i).
           case try_symbol_method(state, search_val, value.symbol_replace) {
             Ok(#(Some(method), state)) ->
-              call_symbol_method(state, method, search_val, [
-                JsString(s),
-                replace_val,
-              ])
+              call_symbol_method(state, method, search_val, [this, replace_val])
             _ -> #(state, Ok(JsString(s)))
           }
       }
     // Not a RegExp — check Symbol.replace, fallback to string replace-all
-    None -> try_replace_or_string_replace_all(state, s, search_val, replace_val)
+    None ->
+      try_replace_or_string_replace_all(state, this, s, search_val, replace_val)
   }
 }
 
@@ -804,6 +803,7 @@ fn regexp_flags(state: State, val: JsValue) -> option.Option(String) {
 /// Helper for replaceAll: try Symbol.replace, fallback to string replace all occurrences.
 fn try_replace_or_string_replace_all(
   state: State,
+  this: JsValue,
   s: String,
   search_val: JsValue,
   replace_val: JsValue,
@@ -815,7 +815,7 @@ fn try_replace_or_string_replace_all(
   ))
   case method_opt {
     Some(method) ->
-      call_symbol_method(state, method, search_val, [JsString(s), replace_val])
+      call_symbol_method(state, method, search_val, [this, replace_val])
     None -> {
       // String-replace-all: replace all occurrences
       use search_str, state <- coerce.try_to_string(state, search_val)
@@ -1362,15 +1362,35 @@ fn string_from_char_code(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let codes =
-    list.map(args, fn(arg) {
-      let n = helpers.to_number_int(arg) |> option.unwrap(0)
-      // ToUint16: modulo 2^16
-      let code = modulo_uint16(n)
-      code
-    })
-  let result_str = char_codes_to_string(codes, "")
+  use codes, state <- from_char_code_coerce(args, state, [])
+  let result_str = char_codes_to_string(list.reverse(codes), "")
   #(state, Ok(JsString(result_str)))
+}
+
+fn from_char_code_coerce(
+  args: List(JsValue),
+  state: State,
+  acc: List(Int),
+  cont: fn(List(Int), State) -> #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  case args {
+    [] -> cont(acc, state)
+    [arg, ..rest] -> {
+      // §22.1.2.1 step 2.a: ToUint16(nextCU) → ToNumber → ToPrimitive(number).
+      let prim_result = case arg {
+        JsObject(_) -> coerce.to_primitive(state, arg, coerce.NumberHint)
+        other -> Ok(#(other, state))
+      }
+      case prim_result {
+        Error(#(thrown, state)) -> #(state, Error(thrown))
+        Ok(#(prim, state)) -> {
+          let n = helpers.to_number_int(prim) |> option.unwrap(0)
+          let code = modulo_uint16(n)
+          from_char_code_coerce(rest, state, [code, ..acc], cont)
+        }
+      }
+    }
+  }
 }
 
 /// Convert a list of UTF-16 code units to a string.

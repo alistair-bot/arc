@@ -4,7 +4,7 @@
 /// In this implementation, values are stored by Ref (object identity).
 /// Not truly weak (GC doesn't collect entries) but API-compatible.
 import arc/vm/builtins/common.{type BuiltinType}
-import arc/vm/builtins/helpers.{first_arg}
+import arc/vm/builtins/helpers.{first_arg_or_undefined}
 import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/state.{type Heap, type State, State}
@@ -94,7 +94,7 @@ fn weak_set_add(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, ref, state <- require_weak_set(this, state)
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(val_ref) -> {
       let new_data = dict.insert(data, val_ref, True)
       let heap = update_weak_set(state.heap, ref, new_data)
@@ -111,7 +111,7 @@ fn weak_set_has(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, _ref, state <- require_weak_set(this, state)
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(val_ref) -> #(state, Ok(JsBool(dict.has_key(data, val_ref))))
     _ -> #(state, Ok(JsBool(False)))
   }
@@ -124,7 +124,7 @@ fn weak_set_delete(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, ref, state <- require_weak_set(this, state)
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(val_ref) -> {
       let had = dict.has_key(data, val_ref)
       let new_data = dict.delete(data, val_ref)

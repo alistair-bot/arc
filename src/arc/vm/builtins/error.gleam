@@ -1,6 +1,7 @@
 import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/heap
 import arc/vm/internal/elements
+import arc/vm/ops/coerce
 import arc/vm/ops/object
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
@@ -180,7 +181,7 @@ fn call_native(
         common.named_props([#("message", value.builtin_property(JsString(msg)))]),
       )
     [other, ..] -> {
-      use msg, state <- state.try_to_string(state, other)
+      use msg, state <- coerce.try_to_string(state, other)
       alloc_error(
         state,
         proto,
@@ -243,7 +244,7 @@ fn error_to_string(
       case name_val {
         JsUndefined -> error_to_string_msg(state, ref, this, "Error")
         _ -> {
-          use name, state <- state.try_to_string(state, name_val)
+          use name, state <- coerce.try_to_string(state, name_val)
           error_to_string_msg(state, ref, this, name)
         }
       }
@@ -272,7 +273,7 @@ fn error_to_string_msg(
   case msg_val {
     JsUndefined -> error_to_string_combine(state, name, "")
     _ -> {
-      use msg, state <- state.try_to_string(state, msg_val)
+      use msg, state <- coerce.try_to_string(state, msg_val)
       error_to_string_combine(state, name, msg)
     }
   }

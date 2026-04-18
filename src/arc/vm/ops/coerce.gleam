@@ -1,4 +1,5 @@
 import arc/vm/builtins/common
+import arc/vm/builtins/helpers
 import arc/vm/heap
 import arc/vm/ops/object
 import arc/vm/state.{type Heap, type State, State}
@@ -52,7 +53,7 @@ pub fn to_primitive(
         // @@toPrimitive not found → fall through to OrdinaryToPrimitive
         JsUndefined -> ordinary_to_primitive(state, val, ref, hint)
         _ ->
-          case is_callable_value(state.heap, exotic_fn) {
+          case helpers.is_callable(state.heap, exotic_fn) {
             True -> {
               let hint_str = case hint {
                 StringHint -> "string"
@@ -109,7 +110,7 @@ fn try_to_primitive_methods(
         value.Named(name),
         val,
       ))
-      case is_callable_value(state.heap, method) {
+      case helpers.is_callable(state.heap, method) {
         True -> {
           use #(result, new_state) <- result.try(
             state.call(state, method, val, []),
@@ -149,6 +150,19 @@ pub fn js_to_string(
     JsUndefined -> Ok(#("undefined", state))
     JsUninitialized -> Ok(#("undefined", state))
     JsBigInt(BigInt(n)) -> Ok(#(int.to_string(n), state))
+  }
+}
+
+/// CPS wrapper for js_to_string. Use with `use` syntax:
+///   use str, state <- coerce.try_to_string(state, val)
+pub fn try_to_string(
+  state: State,
+  val: JsValue,
+  cont: fn(String, State) -> #(State, Result(b, JsValue)),
+) -> #(State, Result(b, JsValue)) {
+  case js_to_string(state, val) {
+    Ok(#(str, state)) -> cont(str, state)
+    Error(#(thrown, state)) -> #(state, Error(thrown))
   }
 }
 
@@ -231,17 +245,4 @@ pub fn thrown_type_error(
 ) -> Result(a, #(JsValue, State)) {
   let #(h, err) = common.make_type_error(state.heap, state.builtins, msg)
   Error(#(err, State(..state, heap: h)))
-}
-
-/// Helper: check if a JsValue is callable.
-pub fn is_callable_value(h: Heap, val: JsValue) -> Bool {
-  case val {
-    JsObject(ref) ->
-      case heap.read(h, ref) {
-        Some(ObjectSlot(kind: FunctionObject(..), ..)) -> True
-        Some(ObjectSlot(kind: NativeFunction(_), ..)) -> True
-        _ -> False
-      }
-    _ -> False
-  }
 }

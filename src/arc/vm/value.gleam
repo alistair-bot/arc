@@ -996,6 +996,19 @@ pub fn configurable(prop: Property) -> Property {
   }
 }
 
+pub fn prop_enumerable(prop: Property) -> Bool {
+  case prop {
+    DataProperty(enumerable: e, ..) | AccessorProperty(enumerable: e, ..) -> e
+  }
+}
+
+pub fn prop_configurable(prop: Property) -> Bool {
+  case prop {
+    DataProperty(configurable: c, ..) | AccessorProperty(configurable: c, ..) ->
+      c
+  }
+}
+
 /// Normal assignment: all flags true (obj.x = val, object literals, etc.)
 pub fn data_property(val: JsValue) -> Property {
   data(val) |> writable() |> enumerable() |> configurable()

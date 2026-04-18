@@ -8,16 +8,16 @@
 /// The keys list is stored in REVERSE insertion order so add() is O(1) prepend;
 /// iteration points call list.reverse() once to recover forward order.
 import arc/vm/builtins/common.{type BuiltinType}
-import arc/vm/builtins/helpers.{first_arg}
+import arc/vm/builtins/helpers.{first_arg_or_undefined}
 import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
-  type JsValue, type MapKey, type Ref, type SetNativeFn, AccessorProperty,
-  ArrayObject, Dispatch, Finite, JsBool, JsNull, JsNumber, JsObject, JsUndefined,
-  ObjectSlot, SetConstructor, SetNative, SetObject, SetPrototypeAdd,
-  SetPrototypeClear, SetPrototypeDelete, SetPrototypeDifference,
-  SetPrototypeEntries, SetPrototypeForEach, SetPrototypeGetSize, SetPrototypeHas,
+  type JsValue, type MapKey, type Ref, type SetNativeFn, ArrayObject, Dispatch,
+  Finite, JsBool, JsNull, JsNumber, JsObject, JsUndefined, ObjectSlot,
+  SetConstructor, SetNative, SetObject, SetPrototypeAdd, SetPrototypeClear,
+  SetPrototypeDelete, SetPrototypeDifference, SetPrototypeEntries,
+  SetPrototypeForEach, SetPrototypeGetSize, SetPrototypeHas,
   SetPrototypeIntersection, SetPrototypeIsDisjointFrom, SetPrototypeIsSubsetOf,
   SetPrototypeIsSupersetOf, SetPrototypeSymmetricDifference, SetPrototypeUnion,
   SetPrototypeValues,
@@ -53,29 +53,12 @@ pub fn init(
       #("entries", SetNative(SetPrototypeEntries), 0),
     ])
 
-  // Allocate the size getter function
-  let #(h, size_getter_ref) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      SetNative(SetPrototypeGetSize),
-      "get size",
-      0,
-    )
-
-  // Add the size accessor property to prototype methods
-  let proto_props = [
-    #(
-      "size",
-      AccessorProperty(
-        get: Some(JsObject(size_getter_ref)),
-        set: None,
-        enumerable: False,
-        configurable: True,
-      ),
-    ),
-    ..proto_methods
-  ]
+  // size accessor property (getter, no setter)
+  let #(h, getters) =
+    common.alloc_getters(h, function_proto, [
+      #("size", SetNative(SetPrototypeGetSize)),
+    ])
+  let proto_props = list.append(getters, proto_methods)
 
   let #(h, bt) =
     common.init_type(
@@ -225,7 +208,7 @@ fn set_add(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, ref, state <- require_set(this, state)
-  let val = first_arg(args)
+  let val = first_arg_or_undefined(args)
   let key = value.js_to_map_key(val)
   let new_data = dict.insert(data, key, val)
   let new_keys = case dict.has_key(data, key) {
@@ -243,7 +226,7 @@ fn set_has(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, _keys, _ref, state <- require_set(this, state)
-  let key = value.js_to_map_key(first_arg(args))
+  let key = value.js_to_map_key(first_arg_or_undefined(args))
   #(state, Ok(JsBool(dict.has_key(data, key))))
 }
 
@@ -254,7 +237,7 @@ fn set_delete(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, ref, state <- require_set(this, state)
-  let key = value.js_to_map_key(first_arg(args))
+  let key = value.js_to_map_key(first_arg_or_undefined(args))
   let had = dict.has_key(data, key)
   case had {
     False -> #(state, Ok(JsBool(False)))
@@ -287,7 +270,7 @@ fn set_for_each(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
-  let callback = first_arg(args)
+  let callback = first_arg_or_undefined(args)
   let this_arg = case args {
     [_, ta, ..] -> ta
     _ -> JsUndefined
@@ -335,7 +318,7 @@ fn set_union(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
-  case require_set_like(first_arg(args), state) {
+  case require_set_like(first_arg_or_undefined(args), state) {
     Error(r) -> r
     Ok(#(other_data, other_keys, state)) -> {
       // Keys stored reversed. Iterate other's keys in forward insertion order
@@ -364,7 +347,7 @@ fn set_intersection(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
-  case require_set_like(first_arg(args), state) {
+  case require_set_like(first_arg_or_undefined(args), state) {
     Error(r) -> r
     Ok(#(other_data, _other_keys, state)) -> {
       let #(result_data, result_keys) =
@@ -391,7 +374,7 @@ fn set_difference(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
-  case require_set_like(first_arg(args), state) {
+  case require_set_like(first_arg_or_undefined(args), state) {
     Error(r) -> r
     Ok(#(other_data, _other_keys, state)) -> {
       let #(result_data, result_keys) =
@@ -418,7 +401,7 @@ fn set_symmetric_difference(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
-  case require_set_like(first_arg(args), state) {
+  case require_set_like(first_arg_or_undefined(args), state) {
     Error(r) -> r
     Ok(#(other_data, other_keys, state)) -> {
       // Keys stored reversed — flip to forward for ordered accumulation.
@@ -463,7 +446,7 @@ fn set_is_subset_of(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
-  case require_set_like(first_arg(args), state) {
+  case require_set_like(first_arg_or_undefined(args), state) {
     Error(r) -> r
     Ok(#(other_data, _other_keys, state)) -> {
       let is_subset =
@@ -482,7 +465,7 @@ fn set_is_superset_of(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, _keys, _ref, state <- require_set(this, state)
-  case require_set_like(first_arg(args), state) {
+  case require_set_like(first_arg_or_undefined(args), state) {
     Error(r) -> r
     Ok(#(_other_data, other_keys, state)) -> {
       let is_superset =
@@ -499,7 +482,7 @@ fn set_is_disjoint_from(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, keys, _ref, state <- require_set(this, state)
-  case require_set_like(first_arg(args), state) {
+  case require_set_like(first_arg_or_undefined(args), state) {
     Error(r) -> r
     Ok(#(other_data, _other_keys, state)) -> {
       let is_disjoint =

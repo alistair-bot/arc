@@ -161,10 +161,6 @@ pub fn validate_object(
 
 // -- Coercers ----------------------------------------------------------------
 
-/// ES ToString — coerces any value to a string via ToPrimitive. Re-enters
-/// the VM for `valueOf`/`toString` calls; propagates anything thrown.
-pub const to_string = state.try_to_string
-
 /// ES ToNumber followed by ToIntegerOrInfinity, clamped to a Gleam `Int`.
 /// NaN/undefined become 0; ±Infinity becomes 0. Does NOT re-enter the VM
 /// (objects are not coerced — they yield 0).

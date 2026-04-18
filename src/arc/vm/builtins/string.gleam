@@ -2,6 +2,7 @@ import arc/vm/builtins/common.{type BuiltinType}
 import arc/vm/builtins/helpers
 import arc/vm/heap
 import arc/vm/limits
+import arc/vm/ops/coerce
 import arc/vm/ops/object
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
@@ -262,7 +263,10 @@ fn string_index_of(
   // Steps 1-2: RequireObjectCoercible + ToString
   use s, state <- with_this_string(this, state)
   // Step 3: ToString(searchString)
-  use search, state <- state.try_to_string(state, helpers.first_arg(args))
+  use search, state <- coerce.try_to_string(
+    state,
+    helpers.first_arg_or_undefined(args),
+  )
   // Steps 4-7: ToIntegerOrInfinity(position), clamp
   let from = helpers.get_int_arg(args, 1, 0)
   // Step 8: StringIndexOf(S, searchStr, start)
@@ -297,7 +301,10 @@ fn string_last_index_of(
   // Steps 1-2: RequireObjectCoercible + ToString
   use s, state <- with_this_string(this, state)
   // Step 3: ToString(searchString)
-  use search, state <- state.try_to_string(state, helpers.first_arg(args))
+  use search, state <- coerce.try_to_string(
+    state,
+    helpers.first_arg_or_undefined(args),
+  )
   // Step 7: len = length of S
   let len = string.length(s)
   // Steps 4-6, 8: ToNumber(position), handle NaN => len, clamp
@@ -338,7 +345,10 @@ fn string_includes(
   // Steps 1-2: RequireObjectCoercible + ToString
   use s, state <- with_this_string(this, state)
   // Step 5: ToString(searchString)
-  use search, state <- state.try_to_string(state, helpers.first_arg(args))
+  use search, state <- coerce.try_to_string(
+    state,
+    helpers.first_arg_or_undefined(args),
+  )
   // Steps 6-9: ToIntegerOrInfinity(position), clamp
   let from = helpers.get_int_arg(args, 1, 0)
   // Steps 10-12: StringIndexOf and return boolean
@@ -371,7 +381,10 @@ fn string_starts_with(
   // Steps 1-2: RequireObjectCoercible + ToString
   use s, state <- with_this_string(this, state)
   // Step 5: ToString(searchString)
-  use search, state <- state.try_to_string(state, helpers.first_arg(args))
+  use search, state <- coerce.try_to_string(
+    state,
+    helpers.first_arg_or_undefined(args),
+  )
   // Steps 7-8: position handling + clamp
   let from = helpers.get_int_arg(args, 1, 0)
   // Steps 10-12: drop prefix, check starts_with
@@ -404,7 +417,10 @@ fn string_ends_with(
   // Steps 1-2: RequireObjectCoercible + ToString
   use s, state <- with_this_string(this, state)
   // Step 5: ToString(searchString)
-  use search, state <- state.try_to_string(state, helpers.first_arg(args))
+  use search, state <- coerce.try_to_string(
+    state,
+    helpers.first_arg_or_undefined(args),
+  )
   // Step 6: len = length of S
   let len = string.length(s)
   // Steps 7-8: endPosition handling, clamp to [0, len]
@@ -449,7 +465,7 @@ fn string_slice(
   let len = string.length(s)
   // Steps 4-7: ToIntegerOrInfinity(start), resolve negatives
   let start =
-    helpers.first_arg(args)
+    helpers.first_arg_or_undefined(args)
     |> helpers.to_number_int
     |> option.map(resolve_slice_index(_, len))
     |> option.unwrap(0)
@@ -674,7 +690,7 @@ fn string_match(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use s, state <- with_this_string(this, state)
-  let regexp_val = helpers.first_arg(args)
+  let regexp_val = helpers.first_arg_or_undefined(args)
   // Step 2-3: delegate to Symbol.match, or construct RegExp and delegate
   delegate_or_regexp(state, regexp_val, value.symbol_match, JsString(s), JsNull)
 }
@@ -686,7 +702,7 @@ fn string_search(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use s, state <- with_this_string(this, state)
-  let regexp_val = helpers.first_arg(args)
+  let regexp_val = helpers.first_arg_or_undefined(args)
   // Step 2-3: delegate to Symbol.search, or construct RegExp and delegate
   delegate_or_regexp(
     state,
@@ -704,7 +720,7 @@ fn string_replace(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use s, state <- with_this_string(this, state)
-  let search_val = helpers.first_arg(args)
+  let search_val = helpers.first_arg_or_undefined(args)
   let replace_val = case args {
     [_, rv, ..] -> rv
     _ -> JsUndefined
@@ -720,8 +736,8 @@ fn string_replace(
       call_symbol_method(state, method, search_val, [JsString(s), replace_val])
     None -> {
       // String-replace-string: replace first occurrence only
-      use search_str, state <- state.try_to_string(state, search_val)
-      use replace_str, state <- state.try_to_string(state, replace_val)
+      use search_str, state <- coerce.try_to_string(state, search_val)
+      use replace_str, state <- coerce.try_to_string(state, replace_val)
       #(state, Ok(JsString(string_replace_first(s, search_str, replace_str))))
     }
   }
@@ -746,7 +762,7 @@ fn string_replace_all(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use s, state <- with_this_string(this, state)
-  let search_val = helpers.first_arg(args)
+  let search_val = helpers.first_arg_or_undefined(args)
   let replace_val = case args {
     [_, rv, ..] -> rv
     _ -> JsUndefined
@@ -802,8 +818,8 @@ fn try_replace_or_string_replace_all(
       call_symbol_method(state, method, search_val, [JsString(s), replace_val])
     None -> {
       // String-replace-all: replace all occurrences
-      use search_str, state <- state.try_to_string(state, search_val)
-      use replace_str, state <- state.try_to_string(state, replace_val)
+      use search_str, state <- coerce.try_to_string(state, search_val)
+      use replace_str, state <- coerce.try_to_string(state, replace_val)
       #(state, Ok(JsString(string.replace(s, search_str, replace_str))))
     }
   }
@@ -888,7 +904,7 @@ fn string_split_parts(
     _, JsUndefined -> alloc(state, [JsString(s)])
     _, _ -> {
       // Step 5: R = ToString(separator)
-      use sep, state <- state.try_to_string(state, sep_val)
+      use sep, state <- coerce.try_to_string(state, sep_val)
       let parts = case sep {
         "" -> string.to_graphemes(s) |> list.map(JsString)
         _ -> string.split(s, sep) |> list.map(JsString)
@@ -928,7 +944,7 @@ fn concat_loop(
     [] -> #(state, Ok(JsString(acc)))
     // Step 4a-4b: ToString(next), R = R + nextString
     [arg, ..rest] -> {
-      use s, state <- state.try_to_string(state, arg)
+      use s, state <- coerce.try_to_string(state, arg)
       concat_loop(rest, acc <> s, state)
     }
   }
@@ -1007,7 +1023,7 @@ fn string_repeat(
   use s, state <- with_this_string(this, state)
   // Step 3: Let n be ? ToIntegerOrInfinity(count).
   // Step 4: If n < 0 or n = +∞, throw a RangeError.
-  let count_val = helpers.first_arg(args)
+  let count_val = helpers.first_arg_or_undefined(args)
   case count_val {
     JsNumber(value.Infinity) | JsNumber(value.NegInfinity) ->
       state.range_error(state, "Invalid count value: Infinity")
@@ -1090,7 +1106,7 @@ fn string_pad(
     [_, JsUndefined, ..] | [_] | [] -> finish(state, " ")
     [_, v, ..] -> {
       // StringPad step 6: ToString(fillString)
-      use pad, state <- state.try_to_string(state, v)
+      use pad, state <- coerce.try_to_string(state, v)
       // StringPad steps 7-11: pad and return
       finish(state, pad)
     }
@@ -1196,11 +1212,11 @@ fn string_normalize(
   // Steps 1-2: RequireObjectCoercible + ToString
   use s, state <- with_this_string(this, state)
   // Steps 3-4: resolve normalization form
-  case helpers.first_arg(args) {
+  case helpers.first_arg_or_undefined(args) {
     JsUndefined -> #(state, Ok(JsString(s)))
     form_val -> {
       // Step 4: ToString(form)
-      use form, state <- state.try_to_string(state, form_val)
+      use form, state <- coerce.try_to_string(state, form_val)
       // Step 5: validate form
       case form {
         "NFC" | "NFD" | "NFKC" | "NFKD" ->
@@ -1243,7 +1259,7 @@ fn string_raw(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   // Step 2: ToObject(template)
-  let template = helpers.first_arg(args)
+  let template = helpers.first_arg_or_undefined(args)
   let substitutions = case args {
     [_, ..rest] -> rest
     [] -> []
@@ -1286,7 +1302,7 @@ fn string_raw_loop(
   // Step 8a: Get(literals, ToString(nextIndex))
   use lit_val, state <- try_get_of(state, raw_val, int.to_string(index))
   // Step 8b: ToString(nextLiteralVal)
-  use lit, state <- state.try_to_string(state, lit_val)
+  use lit, state <- coerce.try_to_string(state, lit_val)
   let acc = acc <> lit
   // Step 8d: If nextIndex + 1 = literalCount, return R
   case index + 1 == literal_count {
@@ -1316,7 +1332,7 @@ fn string_raw_add_sub(
   case substitutions {
     [sub_val, ..rest_subs] -> {
       // Step 8e.ii: ToString(nextSubVal)
-      use sub, state <- state.try_to_string(state, sub_val)
+      use sub, state <- coerce.try_to_string(state, sub_val)
       // Step 8f: nextIndex = nextIndex + 1
       string_raw_loop(
         raw_val,
@@ -1479,7 +1495,7 @@ fn string_substr(
 ) -> #(State, Result(JsValue, JsValue)) {
   use s, state <- with_this_string(this, state)
   let size = string.length(s)
-  let start = case helpers.to_number_int(helpers.first_arg(args)) {
+  let start = case helpers.to_number_int(helpers.first_arg_or_undefined(args)) {
     Some(n) if n < 0 -> int.max(size + n, 0)
     Some(n) -> n
     None -> 0
@@ -1506,7 +1522,10 @@ fn string_locale_compare(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use s, state <- with_this_string(this, state)
-  use that, state <- state.try_to_string(state, helpers.first_arg(args))
+  use that, state <- coerce.try_to_string(
+    state,
+    helpers.first_arg_or_undefined(args),
+  )
   let n = case string.compare(s, that) {
     order.Lt -> -1.0
     order.Eq -> 0.0
@@ -1523,7 +1542,7 @@ fn string_match_all(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use _s, state <- with_this_string(this, state)
-  let regexp_arg = helpers.first_arg(args)
+  let regexp_arg = helpers.first_arg_or_undefined(args)
   // Delegate to Symbol.matchAll on the regexp if present
   case regexp_arg {
     JsObject(ref) -> {
@@ -1586,7 +1605,10 @@ fn html_wrap_attr(
   attr: String,
 ) -> #(State, Result(JsValue, JsValue)) {
   use s, state <- with_this_string(this, state)
-  use attr_val, state <- state.try_to_string(state, helpers.first_arg(args))
+  use attr_val, state <- coerce.try_to_string(
+    state,
+    helpers.first_arg_or_undefined(args),
+  )
   // Escape quotes in attribute value per spec
   let escaped = string.replace(attr_val, "\"", "&quot;")
   #(
@@ -1621,15 +1643,9 @@ fn coerce_to_string(
         JsNull -> "null"
         _ -> "undefined"
       }
-      let #(h, err) =
-        common.make_type_error(
-          state.heap,
-          state.builtins,
-          "Cannot read properties of " <> type_name,
-        )
-      Error(#(err, State(..state, heap: h)))
+      coerce.thrown_type_error(state, "Cannot read properties of " <> type_name)
     }
-    _ -> state.to_string(state, this)
+    _ -> coerce.js_to_string(state, this)
   }
 }
 

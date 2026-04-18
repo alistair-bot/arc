@@ -1,6 +1,8 @@
 import arc/vm/builtins/common.{type BuiltinType}
+import arc/vm/builtins/helpers
 import arc/vm/builtins/math as builtins_math
 import arc/vm/heap
+import arc/vm/ops/coerce
 import arc/vm/state.{type Heap, type State}
 import arc/vm/value.{
   type JsNum, type JsValue, type NumberNativeFn, type Ref, Dispatch, Finite,
@@ -217,7 +219,7 @@ fn parse_int(
   // Step 2: Let S be TrimString(inputString, START).
   let str_result = case args {
     [val, ..] -> {
-      use #(s, state) <- result.map(state.to_string(state, val))
+      use #(s, state) <- result.map(coerce.js_to_string(state, val))
       // Step 2: TrimString(inputString, START) — leading whitespace only
       #(string.trim_start(s), state)
     }
@@ -278,7 +280,7 @@ fn parse_float(
   // Step 2: Let trimmedString be TrimString(inputString, START).
   let str_result = case args {
     [val, ..] -> {
-      use #(s, state) <- result.map(state.to_string(state, val))
+      use #(s, state) <- result.map(coerce.js_to_string(state, val))
       // Step 2: TrimString(inputString, START) — leading whitespace only
       #(string.trim_start(s), state)
     }
@@ -316,10 +318,7 @@ fn js_is_nan(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let val = helpers.first_arg_or_undefined(args)
   // Step 1: Let num be ? ToNumber(number).
   let num = builtins_math.to_number(val)
   // Steps 2-3: If num is NaN, return true; else false.
@@ -342,10 +341,7 @@ fn js_is_finite(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let val = helpers.first_arg_or_undefined(args)
   // Step 1: Let num be ? ToNumber(number).
   let num = builtins_math.to_number(val)
   // Steps 2-3: If num is finite, return true; else false.

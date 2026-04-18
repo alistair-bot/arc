@@ -3,6 +3,7 @@ import arc/vm/builtins/helpers
 import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/limits
+import arc/vm/ops/coerce
 import arc/vm/ops/object
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
@@ -314,7 +315,7 @@ fn array_join(
     [JsUndefined, ..] | [] -> JsString(",")
     [v, ..] -> v
   }
-  use separator, state <- state.try_to_string(state, sep_val)
+  use separator, state <- coerce.try_to_string(state, sep_val)
   // Guard: O(length) string materialization — cap at max_iteration.
   // Steps 5-8: Build result string R by iterating k from 0 to len-1,
   //            joining elements with sep. Return R.
@@ -349,7 +350,7 @@ fn join_elements(
           join_elements(state, this, idx + 1, length, separator, ["", ..acc])
         // Step 7c (cont.): Otherwise, let next be ? ToString(element).
         _ -> {
-          use str, state <- state.try_to_string(state, val)
+          use str, state <- coerce.try_to_string(state, val)
           // Step 7d: Set R to string-concatenation of R and next.
           // Step 7e: Set k to k + 1.
           join_elements(state, this, idx + 1, length, separator, [str, ..acc])
@@ -1517,10 +1518,7 @@ fn array_fill(
   // Steps 1-2: ToObject(this), LengthOfArrayLike(O)
   use ref, length, state <- require_array(this, state)
   // Step 12 uses value; if not provided, defaults to undefined
-  let fill_val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let fill_val = helpers.first_arg_or_undefined(args)
   // Steps 3-6: relativeStart → k (clamped index)
   // resolve_index handles ToIntegerOrInfinity + clamping; default 0 when absent
   let start = case args {
@@ -1632,10 +1630,7 @@ fn array_index_of(
   use _ref, length, state <- require_array(this, state)
   // Step 3: If len = 0, return -1
   use <- bool.guard(length == 0, #(state, Ok(js_int(-1))))
-  let search = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let search = helpers.first_arg_or_undefined(args)
   // Steps 4-6: n = ToIntegerOrInfinity(fromIndex), handle ±Infinity
   case args {
     // Step 5: If n = +∞, return -1 (no index >= +∞)
@@ -1699,10 +1694,7 @@ fn array_last_index_of(
   use _ref, length, state <- require_array(this, state)
   // Step 3: If len = 0, return -1
   use <- bool.guard(length == 0, #(state, Ok(js_int(-1))))
-  let search = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let search = helpers.first_arg_or_undefined(args)
   // Steps 4-6: fromIndex present → ToIntegerOrInfinity; absent → len - 1
   // Checked by arg COUNT, not value (see MEMORY.md lastIndexOf gotcha).
   case args {
@@ -1764,10 +1756,7 @@ fn array_includes(
   use _ref, length, state <- require_array(this, state)
   // Step 3: If len = 0, return false
   use <- bool.guard(length == 0, #(state, Ok(JsBool(False))))
-  let search = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let search = helpers.first_arg_or_undefined(args)
   // Steps 4-6: n = ToIntegerOrInfinity(fromIndex), handle ±Infinity
   case args {
     // Step 5: If n = +∞, return false
@@ -2435,7 +2424,7 @@ fn stringify_elements(
   case values {
     [] -> Ok(#(list.reverse(acc), state))
     [val, ..rest] -> {
-      use #(str, state) <- result.try(state.to_string(state, val))
+      use #(str, state) <- result.try(coerce.js_to_string(state, val))
       stringify_elements(state, rest, [#(str, val), ..acc])
     }
   }
@@ -4230,7 +4219,7 @@ fn to_locale_string_loop(
         JsUndefined | JsNull ->
           to_locale_string_loop(state, this, idx + 1, length, ["", ..acc])
         _ -> {
-          use s, state <- state.try_to_string(state, elem)
+          use s, state <- coerce.try_to_string(state, elem)
           to_locale_string_loop(state, this, idx + 1, length, [s, ..acc])
         }
       }

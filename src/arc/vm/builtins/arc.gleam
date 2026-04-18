@@ -2,6 +2,7 @@ import arc/vm/builtins/common
 import arc/vm/builtins/promise as builtins_promise
 import arc/vm/heap
 import arc/vm/internal/elements
+import arc/vm/ops/coerce
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
   type ArcNativeFn, type JsValue, type MailboxEvent, type PortableMessage,
@@ -151,15 +152,7 @@ fn peek(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue))
         common.alloc_pojo(state.heap, state.builtins.object.prototype, props)
       #(State(..state, heap:), Ok(JsObject(result_ref)))
     }
-    None -> {
-      let #(heap, err) =
-        common.make_type_error(
-          state.heap,
-          state.builtins,
-          "Arc.peek: argument is not a Promise",
-        )
-      #(State(..state, heap:), Error(err))
-    }
+    None -> state.type_error(state, "Arc.peek: argument is not a Promise")
   }
 }
 
@@ -210,10 +203,7 @@ fn send(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue))
 
   case result {
     Ok(val) -> #(state, Ok(val))
-    Error(msg) -> {
-      let #(heap, err) = common.make_type_error(state.heap, state.builtins, msg)
-      #(State(..state, heap:), Error(err))
-    }
+    Error(msg) -> state.type_error(state, msg)
   }
 }
 
@@ -280,15 +270,11 @@ fn receive_async(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   case state.event_loop {
-    False -> {
-      let #(heap, err) =
-        common.make_type_error(
-          state.heap,
-          state.builtins,
-          "Arc.receiveAsync() requires the event loop (--event-loop flag)",
-        )
-      #(State(..state, heap:), Error(err))
-    }
+    False ->
+      state.type_error(
+        state,
+        "Arc.receiveAsync() requires the event loop (--event-loop flag)",
+      )
     True -> receive_async_inner(args, state)
   }
 }
@@ -343,15 +329,11 @@ fn set_timeout(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   case state.event_loop {
-    False -> {
-      let #(heap, err) =
-        common.make_type_error(
-          state.heap,
-          state.builtins,
-          "Arc.setTimeout() requires the event loop (--event-loop flag)",
-        )
-      #(State(..state, heap:), Error(err))
-    }
+    False ->
+      state.type_error(
+        state,
+        "Arc.setTimeout() requires the event loop (--event-loop flag)",
+      )
     True -> set_timeout_inner(args, state)
   }
 }
@@ -502,7 +484,7 @@ fn log_stringify_one(val: JsValue, state: State) -> #(State, String) {
         Some(pid) -> #(state, "Pid" <> ffi_pid_to_string(pid))
         None ->
           // Try to convert to string via toString
-          case state.to_string(state, val) {
+          case coerce.js_to_string(state, val) {
             Ok(#(s, state)) -> #(state, s)
             Error(#(_, state)) -> #(state, "[object Object]")
           }

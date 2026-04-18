@@ -11,6 +11,7 @@
 /// The request queue is the key difference: callers can fire next();next();next()
 /// before any settle, and each gets its own promise.
 import arc/vm/builtins/common
+import arc/vm/builtins/helpers
 import arc/vm/builtins/promise as builtins_promise
 import arc/vm/completion.{
   type Completion, AwaitCompletion, NormalCompletion, ThrowCompletion,
@@ -55,10 +56,7 @@ pub fn call_native_method(
   execute_inner: ExecuteInnerFn,
   unwind_to_catch: UnwindToCatchFn,
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
-  let arg = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let arg = helpers.first_arg_or_undefined(args)
   let #(h, promise_ref, _data_ref, resolve, reject) =
     new_promise_capability(state.heap, state.builtins)
   let state = State(..state, heap: h)
@@ -334,10 +332,7 @@ pub fn call_native_resume(
   execute_inner: ExecuteInnerFn,
   unwind_to_catch: UnwindToCatchFn,
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
-  let settled = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let settled = helpers.first_arg_or_undefined(args)
   let ret = fn(state: State) {
     Ok(State(..state, stack: [JsUndefined, ..rest_stack], pc: state.pc + 1))
   }

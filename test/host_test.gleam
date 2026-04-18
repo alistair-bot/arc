@@ -1,6 +1,7 @@
 import arc/engine
 import arc/host
 import arc/vm/completion.{NormalCompletion, ThrowCompletion}
+import arc/vm/ops/coerce
 import arc/vm/state
 import arc/vm/value.{Finite, JsNumber, JsString, JsUndefined}
 import gleam/int
@@ -330,7 +331,7 @@ pub fn to_string_coerces_number_test() {
     |> engine.define_fn("str", 1, fn(args, _, s) {
       case args {
         [v, ..] -> {
-          use str, s <- host.to_string(s, v)
+          use str, s <- coerce.try_to_string(s, v)
           #(s, Ok(JsString("got:" <> str)))
         }
         _ -> #(s, Ok(JsUndefined))
@@ -347,7 +348,7 @@ pub fn to_string_calls_user_tostring_test() {
     |> engine.define_fn("str", 1, fn(args, _, s) {
       case args {
         [v, ..] -> {
-          use str, s <- host.to_string(s, v)
+          use str, s <- coerce.try_to_string(s, v)
           #(s, Ok(JsString(str)))
         }
         _ -> #(s, Ok(JsUndefined))
@@ -364,7 +365,7 @@ pub fn to_string_propagates_throw_test() {
     |> engine.define_fn("str", 1, fn(args, _, s) {
       case args {
         [v, ..] -> {
-          use str, s <- host.to_string(s, v)
+          use str, s <- coerce.try_to_string(s, v)
           #(s, Ok(JsString(str)))
         }
         _ -> #(s, Ok(JsUndefined))

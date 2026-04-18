@@ -1,4 +1,5 @@
 import arc/vm/builtins/common.{type Builtins}
+import arc/vm/builtins/helpers
 import arc/vm/builtins/regexp as builtins_regexp
 import arc/vm/completion.{
   type Completion, AwaitCompletion, NormalCompletion, ThrowCompletion,
@@ -54,15 +55,6 @@ import gleam/string
 // ============================================================================
 // Internal state (types defined in state.gleam for cross-module access)
 // ============================================================================
-
-/// The js_to_string callback that gets stored in State.
-/// Delegates to coerce.js_to_string for ToPrimitive + ToString.
-fn js_to_string_callback(
-  state: State,
-  val: JsValue,
-) -> Result(#(String, State), #(JsValue, State)) {
-  coerce.js_to_string(state, val)
-}
 
 /// The call_fn callback that gets stored in State.
 /// Delegates to event_loop.run_handler_with_this for re-entrant JS function calls
@@ -216,7 +208,6 @@ pub fn new_state(
     symbol_descriptions:,
     symbol_registry:,
     realms: dict.new(),
-    js_to_string: js_to_string_callback,
     call_fn: call_fn_callback,
     construct_fn: construct_fn_callback,
     call_depth: 0,
@@ -392,6 +383,13 @@ fn truncate_stack(stack: List(JsValue), depth: Int) -> List(JsValue) {
   }
 }
 
+fn underflow(
+  state: State,
+  op: String,
+) -> Result(State, #(StepResult, JsValue, Heap)) {
+  Error(#(StepVmError(StackUnderflow(op)), JsUndefined, state.heap))
+}
+
 /// Pop top of stack and jump to `target` if `condition(value)` is true,
 /// otherwise advance to next instruction.
 fn conditional_jump(
@@ -405,12 +403,7 @@ fn conditional_jump(
         True -> Ok(State(..state, stack: rest, pc: target))
         False -> Ok(State(..state, stack: rest, pc: state.pc + 1))
       }
-    [] ->
-      Error(#(
-        StepVmError(StackUnderflow("ConditionalJump")),
-        JsUndefined,
-        state.heap,
-      ))
+    [] -> underflow(state, "ConditionalJump")
   }
 }
 
@@ -535,8 +528,7 @@ fn step_stack(
     Pop -> {
       case state.stack {
         [_, ..rest] -> Ok(State(..state, stack: rest, pc: state.pc + 1))
-        [] ->
-          Error(#(StepVmError(StackUnderflow("Pop")), JsUndefined, state.heap))
+        [] -> underflow(state, "Pop")
       }
     }
 
@@ -544,8 +536,7 @@ fn step_stack(
       case state.stack {
         [top, ..] ->
           Ok(State(..state, stack: [top, ..state.stack], pc: state.pc + 1))
-        [] ->
-          Error(#(StepVmError(StackUnderflow("Dup")), JsUndefined, state.heap))
+        [] -> underflow(state, "Dup")
       }
     }
 
@@ -553,8 +544,7 @@ fn step_stack(
       case state.stack {
         [a, b, ..rest] ->
           Ok(State(..state, stack: [b, a, ..rest], pc: state.pc + 1))
-        _ ->
-          Error(#(StepVmError(StackUnderflow("Swap")), JsUndefined, state.heap))
+        _ -> underflow(state, "Swap")
       }
     }
 
@@ -590,12 +580,7 @@ fn step_locals(
           let locals = tuple_array.set_unchecked(index, value, state.locals)
           Ok(State(..state, stack: rest, locals:, pc: state.pc + 1))
         }
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("PutLocal")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "PutLocal")
       }
     }
 
@@ -647,12 +632,7 @@ fn step_locals(
               ))
           }
         }
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("PutBoxed")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "PutBoxed")
       }
     }
 
@@ -835,12 +815,7 @@ fn step_globals(
               }
           }
         }
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("PutGlobal")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "PutGlobal")
       }
     }
 
@@ -966,12 +941,7 @@ fn step_globals(
               pc: state.pc + 1,
             ),
           )
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("InitGlobalLex")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "InitGlobalLex")
       }
     }
 
@@ -986,12 +956,7 @@ fn step_globals(
             ),
           )
         }
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("TypeOf")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "TypeOf")
       }
     }
 
@@ -1178,8 +1143,7 @@ fn step_operators(
               }
           }
         }
-        _ ->
-          Error(#(StepVmError(StackUnderflow("BinOp")), JsUndefined, state.heap))
+        _ -> underflow(state, "BinOp")
       }
     }
 
@@ -1194,12 +1158,7 @@ fn step_operators(
             }
           }
         }
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("UnaryOp")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "UnaryOp")
       }
     }
 
@@ -1381,20 +1340,14 @@ fn step_control_flow(
     opcode.PopTry -> {
       case state.try_stack {
         [_, ..rest] -> Ok(State(..state, try_stack: rest, pc: state.pc + 1))
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("PopTry: empty try_stack")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "PopTry: empty try_stack")
       }
     }
 
     opcode.Throw -> {
       case state.stack {
         [value, ..] -> Error(#(Thrown, value, state.heap))
-        [] ->
-          Error(#(StepVmError(StackUnderflow("Throw")), JsUndefined, state.heap))
+        [] -> underflow(state, "Throw")
       }
     }
 
@@ -1423,12 +1376,7 @@ fn step_control_flow(
               pc: state.pc + 1,
             ),
           )
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("EnterFinallyThrow")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "EnterFinallyThrow")
       }
     }
 
@@ -1440,12 +1388,7 @@ fn step_control_flow(
           Error(#(Thrown, value, state.heap))
         [state.ReturnCompletion(value:), ..] ->
           Error(#(Done, value, state.heap))
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("LeaveFinally: empty finally_stack")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "LeaveFinally: empty finally_stack")
       }
     }
 
@@ -1504,12 +1447,7 @@ fn step_objects(
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("GetField")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "GetField")
       }
     }
 
@@ -1533,12 +1471,7 @@ fn step_objects(
           )
           State(..state, stack: [val, receiver, ..rest], pc: state.pc + 1)
         }
-        [] ->
-          Error(#(
-            StepVmError(StackUnderflow("GetField2")),
-            JsUndefined,
-            state.heap,
-          ))
+        [] -> underflow(state, "GetField2")
       }
     }
 
@@ -1559,12 +1492,7 @@ fn step_objects(
           // PutField on non-object: silently ignore, still return value
           Ok(State(..state, stack: [value, ..rest], pc: state.pc + 1))
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("PutField")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "PutField")
       }
     }
 
@@ -1580,12 +1508,7 @@ fn step_objects(
           // DefineField on non-object: no-op, keep object on stack
           Ok(State(..state, pc: state.pc + 1))
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("DefineField")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "DefineField")
       }
     }
 
@@ -1598,12 +1521,7 @@ fn step_objects(
           Ok(State(..state, heap:, stack: [obj, ..rest], pc: state.pc + 1))
         }
         [_, _, ..] -> Ok(State(..state, pc: state.pc + 1))
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("DefineMethod")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "DefineMethod")
       }
     }
 
@@ -1618,12 +1536,7 @@ fn step_objects(
           Ok(State(..state, heap:, stack: [obj, ..rest], pc: state.pc + 1))
         }
         [_, _, ..] -> Ok(State(..state, pc: state.pc + 1))
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("DefineAccessor")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "DefineAccessor")
       }
     }
 
@@ -1644,12 +1557,7 @@ fn step_objects(
           State(..state, heap:, stack: [obj, ..rest], pc: state.pc + 1)
         }
         [_, _, _, ..] -> Ok(State(..state, pc: state.pc + 1))
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("DefineAccessorComputed")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "DefineAccessorComputed")
       }
     }
 
@@ -1669,12 +1577,7 @@ fn step_objects(
         [_, _, _, ..rest] ->
           // Non-object target: shouldn't happen for literals, but pop and keep going.
           Ok(State(..state, stack: rest, pc: state.pc + 1))
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("DefineFieldComputed")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "DefineFieldComputed")
       }
     }
 
@@ -1691,12 +1594,7 @@ fn step_objects(
           State(..state, stack: [obj, ..rest], pc: state.pc + 1)
         }
         [_, _, ..rest] -> Ok(State(..state, stack: rest, pc: state.pc + 1))
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("ObjectSpread")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "ObjectSpread")
       }
     }
 
@@ -1724,12 +1622,7 @@ fn step_objects(
                 State(..state, stack: [JsBool(True), ..rest], pc: state.pc + 1),
               )
           }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("DeleteField")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "DeleteField")
       }
     }
 
@@ -1770,12 +1663,7 @@ fn step_objects(
                 State(..state, stack: [JsBool(True), ..rest], pc: state.pc + 1),
               )
           }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("DeleteElem")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "DeleteElem")
       }
     }
 
@@ -1920,12 +1808,7 @@ fn step_arrays(
             ),
           )
         }
-        None ->
-          Error(#(
-            StepVmError(StackUnderflow("ArrayFrom")),
-            JsUndefined,
-            state.heap,
-          ))
+        None -> underflow(state, "ArrayFrom")
       }
     }
 
@@ -1960,12 +1843,7 @@ fn step_arrays(
             ),
           )
         }
-        None ->
-          Error(#(
-            StepVmError(StackUnderflow("ArrayFromWithHoles")),
-            JsUndefined,
-            state.heap,
-          ))
+        None -> underflow(state, "ArrayFromWithHoles")
       }
     }
 
@@ -1990,12 +1868,7 @@ fn step_arrays(
           )
           State(..state, stack: [val, ..rest], pc: state.pc + 1)
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("GetElem")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "GetElem")
       }
     }
 
@@ -2014,12 +1887,7 @@ fn step_arrays(
           )
           State(..state, stack: [val, key, receiver, ..rest], pc: state.pc + 1)
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("GetElem2")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "GetElem2")
       }
     }
 
@@ -2036,12 +1904,7 @@ fn step_arrays(
           // PutElem on non-object: silently ignore (JS sloppy mode)
           Ok(State(..state, stack: rest, pc: state.pc + 1))
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("PutElem")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "PutElem")
       }
     }
 
@@ -2053,12 +1916,7 @@ fn step_arrays(
           let heap = push_onto_array(state.heap, ref, val)
           Ok(State(..state, heap:, stack: [arr, ..rest], pc: state.pc + 1))
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("ArrayPush")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "ArrayPush")
       }
     }
 
@@ -2069,12 +1927,7 @@ fn step_arrays(
           let heap = grow_array_length(state.heap, ref)
           Ok(State(..state, heap:, stack: [arr, ..rest], pc: state.pc + 1))
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("ArrayPushHole")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "ArrayPushHole")
       }
     }
 
@@ -2085,12 +1938,7 @@ fn step_arrays(
           use state <- result.map(spread_into_array(state, arr_ref, iterable))
           State(..state, stack: [arr, ..rest], pc: state.pc + 1)
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("ArraySpread")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "ArraySpread")
       }
     }
 
@@ -2186,20 +2034,10 @@ fn step_calls(
                 state,
                 object.inspect(non_func, state.heap) <> " is not a function",
               )
-            [] ->
-              Error(#(
-                StepVmError(StackUnderflow("Call: no callee")),
-                JsUndefined,
-                state.heap,
-              ))
+            [] -> underflow(state, "Call: no callee")
           }
         }
-        None ->
-          Error(#(
-            StepVmError(StackUnderflow("Call: not enough args")),
-            JsUndefined,
-            state.heap,
-          ))
+        None -> underflow(state, "Call: not enough args")
       }
     }
 
@@ -2242,20 +2080,10 @@ fn step_calls(
                 state,
                 object.inspect(non_func, state.heap) <> " is not a function",
               )
-            _ ->
-              Error(#(
-                StepVmError(StackUnderflow("CallMethod")),
-                JsUndefined,
-                state.heap,
-              ))
+            _ -> underflow(state, "CallMethod")
           }
         }
-        None ->
-          Error(#(
-            StepVmError(StackUnderflow("CallMethod: not enough args")),
-            JsUndefined,
-            state.heap,
-          ))
+        None -> underflow(state, "CallMethod: not enough args")
       }
     }
 
@@ -2270,18 +2098,8 @@ fn step_calls(
             object.inspect(non_func, state.heap) <> " is not a constructor",
           )
         }
-        Some(#(_, [])) ->
-          Error(#(
-            StepVmError(StackUnderflow("CallConstructor")),
-            JsUndefined,
-            state.heap,
-          ))
-        None ->
-          Error(#(
-            StepVmError(StackUnderflow("CallConstructor: not enough args")),
-            JsUndefined,
-            state.heap,
-          ))
+        Some(#(_, [])) -> underflow(state, "CallConstructor")
+        None -> underflow(state, "CallConstructor: not enough args")
       }
     }
 
@@ -2371,12 +2189,7 @@ fn step_calls(
                   )
               }
             }
-            None ->
-              Error(#(
-                StepVmError(StackUnderflow("CallSuper: not enough args")),
-                JsUndefined,
-                state.heap,
-              ))
+            None -> underflow(state, "CallSuper: not enough args")
           }
         }
         None -> {
@@ -2398,12 +2211,7 @@ fn step_calls(
             object.inspect(callee, state.heap) <> " is not a function",
           )
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("CallApply")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "CallApply")
       }
     }
 
@@ -2414,12 +2222,7 @@ fn step_calls(
           let args = extract_array_args(state.heap, args_ref)
           call_value(State(..state, stack: rest), method, args, receiver)
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("CallMethodApply")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "CallMethodApply")
       }
     }
 
@@ -2436,12 +2239,7 @@ fn step_calls(
             object.inspect(non_ctor, state.heap) <> " is not a constructor",
           )
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("CallConstructorApply")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "CallConstructorApply")
       }
     }
 
@@ -2585,12 +2383,7 @@ fn step_iteration(
             ),
           )
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("ForInStart")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "ForInStart")
       }
     }
 
@@ -2641,12 +2434,7 @@ fn step_iteration(
                 state.heap,
               ))
           }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("ForInNext")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "ForInNext")
       }
     }
 
@@ -2705,12 +2493,7 @@ fn step_iteration(
                 object.inspect(iterable, state.heap) <> " is not iterable",
               )
           }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("GetIterator")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "GetIterator")
       }
     }
 
@@ -2726,12 +2509,7 @@ fn step_iteration(
                 object.inspect(iterable, state.heap) <> " is not async iterable",
               )
           }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("GetAsyncIterator")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "GetAsyncIterator")
       }
     }
 
@@ -2851,12 +2629,7 @@ fn step_iteration(
                   <> " is not an iterator",
               )
           }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("IteratorNext")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "IteratorNext")
       }
     }
 
@@ -2864,12 +2637,7 @@ fn step_iteration(
       // MVP: just pop the iterator from the stack
       case state.stack {
         [_, ..rest] -> Ok(State(..state, stack: rest, pc: state.pc + 1))
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("IteratorClose")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "IteratorClose")
       }
     }
 
@@ -2935,12 +2703,7 @@ fn step_generators(
               state.throw_type_error(state, "Iterator result is not an object")
           }
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("YieldStar")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "YieldStar")
       }
     }
 
@@ -3038,12 +2801,7 @@ fn step_special(
             ),
           )
         }
-        _ ->
-          Error(#(
-            StepVmError(StackUnderflow("NewRegExp")),
-            JsUndefined,
-            state.heap,
-          ))
+        _ -> underflow(state, "NewRegExp")
       }
     }
 
@@ -3376,7 +3134,7 @@ fn get_iterator_via_symbol(
   // Step 1: Let method be ? GetMethod(obj, @@iterator)
   case object.get_symbol_value(state, ref, value.symbol_iterator, iterable) {
     Ok(#(method, state)) ->
-      case coerce.is_callable_value(state.heap, method) {
+      case helpers.is_callable(state.heap, method) {
         True ->
           // Step 2: Let iterator be ? Call(method, obj)
           case state.call(state, method, iterable, []) {
@@ -3433,9 +3191,7 @@ fn get_async_iterator_via_symbol(
                 kind: value.AsyncFromSyncIteratorObject(sync_iter:),
                 properties: dict.new(),
                 elements: elements.new(),
-                prototype: Some(
-                  state.builtins.async_from_sync_iterator_proto,
-                ),
+                prototype: Some(state.builtins.async_from_sync_iterator_proto),
                 symbol_properties: [],
                 extensible: True,
               ),
@@ -3466,7 +3222,7 @@ fn try_iterator_symbol(
 ) -> Result(#(JsValue, State), State) {
   case object.get_symbol_value(state, ref, sym, iterable) {
     Ok(#(method, state)) ->
-      case coerce.is_callable_value(state.heap, method) {
+      case helpers.is_callable(state.heap, method) {
         True ->
           case state.call(state, method, iterable, []) {
             Ok(#(JsObject(r), state)) -> Ok(#(JsObject(r), state))

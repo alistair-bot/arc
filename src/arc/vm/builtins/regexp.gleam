@@ -8,13 +8,14 @@ import arc/vm/builtins/helpers
 import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/limits
+import arc/vm/ops/coerce
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
-  type JsValue, type Ref, type RegExpNativeFn, AccessorProperty, DataProperty,
-  Dispatch, Finite, JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined,
-  Named, ObjectSlot, RegExpConstructor, RegExpGetDotAll, RegExpGetFlags,
-  RegExpGetGlobal, RegExpGetHasIndices, RegExpGetIgnoreCase, RegExpGetMultiline,
-  RegExpGetSource, RegExpGetSticky, RegExpGetUnicode, RegExpNative, RegExpObject,
+  type JsValue, type Ref, type RegExpNativeFn, DataProperty, Dispatch, Finite,
+  JsBool, JsNull, JsNumber, JsObject, JsString, JsUndefined, Named, ObjectSlot,
+  RegExpConstructor, RegExpGetDotAll, RegExpGetFlags, RegExpGetGlobal,
+  RegExpGetHasIndices, RegExpGetIgnoreCase, RegExpGetMultiline, RegExpGetSource,
+  RegExpGetSticky, RegExpGetUnicode, RegExpNative, RegExpObject,
   RegExpPrototypeExec, RegExpPrototypeTest, RegExpPrototypeToString,
   RegExpSymbolMatch, RegExpSymbolReplace, RegExpSymbolSearch, RegExpSymbolSplit,
 }
@@ -55,103 +56,20 @@ pub fn init(
     ])
 
   // Allocate accessor getter functions for flag properties
-  let #(h, source_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetSource),
-      "get source",
-      0,
-    )
-  let #(h, flags_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetFlags),
-      "get flags",
-      0,
-    )
-  let #(h, global_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetGlobal),
-      "get global",
-      0,
-    )
-  let #(h, ignore_case_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetIgnoreCase),
-      "get ignoreCase",
-      0,
-    )
-  let #(h, multiline_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetMultiline),
-      "get multiline",
-      0,
-    )
-  let #(h, dotall_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetDotAll),
-      "get dotAll",
-      0,
-    )
-  let #(h, sticky_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetSticky),
-      "get sticky",
-      0,
-    )
-  let #(h, unicode_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetUnicode),
-      "get unicode",
-      0,
-    )
-  let #(h, has_indices_getter) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      RegExpNative(RegExpGetHasIndices),
-      "get hasIndices",
-      0,
-    )
-
-  let accessor = fn(getter_ref: Ref) -> value.Property {
-    AccessorProperty(
-      get: Some(JsObject(getter_ref)),
-      set: None,
-      enumerable: False,
-      configurable: True,
-    )
-  }
-
-  let proto_props =
-    list.flatten([
-      proto_methods,
-      [
-        #("source", accessor(source_getter)),
-        #("flags", accessor(flags_getter)),
-        #("global", accessor(global_getter)),
-        #("ignoreCase", accessor(ignore_case_getter)),
-        #("multiline", accessor(multiline_getter)),
-        #("dotAll", accessor(dotall_getter)),
-        #("sticky", accessor(sticky_getter)),
-        #("unicode", accessor(unicode_getter)),
-        #("hasIndices", accessor(has_indices_getter)),
-      ],
+  let #(h, getters) =
+    common.alloc_getters(h, function_proto, [
+      #("source", RegExpNative(RegExpGetSource)),
+      #("flags", RegExpNative(RegExpGetFlags)),
+      #("global", RegExpNative(RegExpGetGlobal)),
+      #("ignoreCase", RegExpNative(RegExpGetIgnoreCase)),
+      #("multiline", RegExpNative(RegExpGetMultiline)),
+      #("dotAll", RegExpNative(RegExpGetDotAll)),
+      #("sticky", RegExpNative(RegExpGetSticky)),
+      #("unicode", RegExpNative(RegExpGetUnicode)),
+      #("hasIndices", RegExpNative(RegExpGetHasIndices)),
     ])
+
+  let proto_props = list.append(proto_methods, getters)
 
   let #(h, builtin) =
     common.init_type(
@@ -349,7 +267,7 @@ fn not_regexp(
 fn string_arg(state: State, args: List(JsValue)) -> String {
   case args {
     [arg, ..] ->
-      case state.to_string(state, arg) {
+      case coerce.js_to_string(state, arg) {
         Ok(#(s, _)) -> s
         Error(_) -> "undefined"
       }
@@ -760,7 +678,7 @@ fn apply_replacements(
             JsUndefined,
             call_args,
           )
-          use replacement, state <- state.try_to_string(state, result)
+          use replacement, state <- coerce.try_to_string(state, result)
           let acc = acc <> replacement
           let prev_end = match.position + string.length(match.matched)
           apply_replacements(
@@ -774,7 +692,7 @@ fn apply_replacements(
           )
         }
         False -> {
-          use template, state <- state.try_to_string(state, replace_value)
+          use template, state <- coerce.try_to_string(state, replace_value)
           case
             get_substitution(
               match.matched,

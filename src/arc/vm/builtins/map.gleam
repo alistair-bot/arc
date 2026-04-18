@@ -22,11 +22,10 @@ import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
-  type JsValue, type MapKey, type MapNativeFn, type Ref, AccessorProperty,
-  Dispatch, JsBool, JsNumber, JsObject, JsUndefined, MapConstructor, MapNative,
-  MapObject, MapPrototypeClear, MapPrototypeDelete, MapPrototypeForEach,
-  MapPrototypeGet, MapPrototypeGetSize, MapPrototypeHas, MapPrototypeSet,
-  ObjectSlot,
+  type JsValue, type MapKey, type MapNativeFn, type Ref, Dispatch, JsBool,
+  JsNumber, JsObject, JsUndefined, MapConstructor, MapNative, MapObject,
+  MapPrototypeClear, MapPrototypeDelete, MapPrototypeForEach, MapPrototypeGet,
+  MapPrototypeGetSize, MapPrototypeHas, MapPrototypeSet, ObjectSlot,
 }
 import gleam/dict
 import gleam/int
@@ -69,29 +68,12 @@ pub fn init(
       #("forEach", MapNative(MapPrototypeForEach), 1),
     ])
 
-  // Allocate the size getter function
-  let #(h, size_getter_ref) =
-    common.alloc_native_fn(
-      h,
-      function_proto,
-      MapNative(MapPrototypeGetSize),
-      "get size",
-      0,
-    )
-
-  // Add the size accessor property to proto_methods
-  let proto_methods = [
-    #(
-      "size",
-      AccessorProperty(
-        get: Some(JsObject(size_getter_ref)),
-        set: None,
-        enumerable: False,
-        configurable: True,
-      ),
-    ),
-    ..proto_methods
-  ]
+  // size accessor property (getter, no setter)
+  let #(h, getters) =
+    common.alloc_getters(h, function_proto, [
+      #("size", MapNative(MapPrototypeGetSize)),
+    ])
+  let proto_methods = list.append(getters, proto_methods)
 
   // Build the prototype + constructor using the standard init_type helper.
   // The constructor carries the proto ref so it can set [[Prototype]] on

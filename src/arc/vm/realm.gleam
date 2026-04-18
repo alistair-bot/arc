@@ -1,5 +1,6 @@
 import arc/compiler
 import arc/parser
+import arc/parser/ast
 import arc/vm/builtins
 import arc/vm/builtins/arc as builtins_arc
 import arc/vm/builtins/common.{type Builtins}
@@ -8,6 +9,7 @@ import arc/vm/exec/event_loop
 import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/internal/tuple_array
+import arc/vm/ops/coerce
 import arc/vm/ops/object
 import arc/vm/state.{
   type Heap, type NativeFnSlot, type State, type StepResult, type VmError, State,
@@ -260,7 +262,7 @@ pub fn eval_script_native(
     [s, ..] -> s
     [] -> JsUndefined
   }
-  use source_str, state <- state.try_to_string(state, source)
+  use source_str, state <- coerce.try_to_string(state, source)
 
   // Read the __realm__ property from the $262 object to find the realm
   let realm_result = case this {
@@ -305,89 +307,71 @@ pub fn eval_script_native(
       const_lexical_globals,
       symbol_descriptions,
       symbol_registry,
-    )) ->
-      case parser.parse(source_str, parser.Script) {
-        Error(err) -> {
-          let #(h, syntax_err) =
-            common.make_syntax_error(
-              state.heap,
-              realm_builtins,
-              parser.parse_error_to_string(err),
+    )) -> {
+      use template <- compile_or_throw(
+        state,
+        realm_builtins,
+        source_str,
+        compiler.compile_repl,
+      )
+      let locals = tuple_array.repeat(JsUndefined, template.local_count)
+      let eval_state =
+        State(
+          ..new_state_fn(
+            template,
+            locals,
+            state.heap,
+            realm_builtins,
+            realm_global,
+            lexical_globals,
+            const_lexical_globals,
+            symbol_descriptions,
+            symbol_registry,
+            False,
+          ),
+          job_queue: state.job_queue,
+          realms: state.realms,
+        )
+      case execute_inner(eval_state) {
+        Error(vm_err) ->
+          state.type_error(
+            state,
+            "evalScript: VM error: " <> string.inspect(vm_err),
+          )
+        Ok(#(completion, final_eval_state)) -> {
+          // Drain microtasks in the eval realm
+          let drained = event_loop.drain_jobs(final_eval_state)
+          // Update the realm slot with potentially modified lexical globals
+          let updated_realm =
+            value.RealmSlot(
+              global_object: realm_global,
+              lexical_globals: drained.lexical_globals,
+              const_lexical_globals: drained.const_lexical_globals,
+              symbol_descriptions: drained.symbol_descriptions,
+              symbol_registry: drained.symbol_registry,
             )
-          #(State(..state, heap: h), Error(syntax_err))
-        }
-        Ok(program) ->
-          case compiler.compile_repl(program) {
-            Error(err) -> {
-              let #(h, syntax_err) =
-                common.make_syntax_error(
-                  state.heap,
-                  realm_builtins,
-                  string.inspect(err),
-                )
-              #(State(..state, heap: h), Error(syntax_err))
-            }
-            Ok(template) -> {
-              let locals = tuple_array.repeat(JsUndefined, template.local_count)
-              let eval_state =
-                State(
-                  ..new_state_fn(
-                    template,
-                    locals,
-                    state.heap,
-                    realm_builtins,
-                    realm_global,
-                    lexical_globals,
-                    const_lexical_globals,
-                    symbol_descriptions,
-                    symbol_registry,
-                    False,
-                  ),
-                  job_queue: state.job_queue,
-                  realms: state.realms,
-                )
-              case execute_inner(eval_state) {
-                Error(vm_err) ->
-                  state.type_error(
-                    state,
-                    "evalScript: VM error: " <> string.inspect(vm_err),
-                  )
-                Ok(#(completion, final_eval_state)) -> {
-                  // Drain microtasks in the eval realm
-                  let drained = event_loop.drain_jobs(final_eval_state)
-                  // Update the realm slot with potentially modified lexical globals
-                  let updated_realm =
-                    value.RealmSlot(
-                      global_object: realm_global,
-                      lexical_globals: drained.lexical_globals,
-                      const_lexical_globals: drained.const_lexical_globals,
-                      symbol_descriptions: drained.symbol_descriptions,
-                      symbol_registry: drained.symbol_registry,
-                    )
-                  let h = heap.write(drained.heap, realm_ref, updated_realm)
-                  // Propagate heap and job queue back to caller
-                  let state =
-                    State(
-                      ..state,
-                      heap: h,
-                      job_queue: drained.job_queue,
-                      pending_receivers: drained.pending_receivers,
-                      outstanding: drained.outstanding,
-                      realms: drained.realms,
-                    )
-                  case completion {
-                    NormalCompletion(val, _) -> #(state, Ok(val))
-                    ThrowCompletion(thrown, _) -> #(state, Error(thrown))
-                    YieldCompletion(_, _) ->
-                      state.type_error(state, "evalScript: unexpected yield")
-                    completion.AwaitCompletion(_, _) ->
-                      state.type_error(state, "evalScript: unexpected await")
-                  }
-                }
-              }
-            }
+          let h = heap.write(drained.heap, realm_ref, updated_realm)
+          // Propagate heap and job queue back to caller
+          let state =
+            State(
+              ..state,
+              heap: h,
+              job_queue: drained.job_queue,
+              pending_receivers: drained.pending_receivers,
+              outstanding: drained.outstanding,
+              realms: drained.realms,
+            )
+          case completion {
+            NormalCompletion(val, _) -> #(state, Ok(val))
+            ThrowCompletion(thrown, _) -> #(state, Error(thrown))
+            YieldCompletion(_, _) ->
+              state.type_error(state, "evalScript: unexpected yield")
+            completion.AwaitCompletion(_, _) ->
+              state.type_error(state, "evalScript: unexpected await")
           }
+        }
       }
+    }
   }
 }
 
@@ -501,6 +485,30 @@ pub fn build_262(
 // eval() and Function() constructor — runtime code evaluation
 // ============================================================================
 
+/// Parse `source` as a Script and run `compile` on it. On parse or compile
+/// failure, allocate a SyntaxError using `builtins` and return it as a thrown
+/// completion. CPS so callers write `use template <- compile_or_throw(...)`.
+fn compile_or_throw(
+  state: State,
+  builtins: Builtins,
+  source: String,
+  compile: fn(ast.Program) -> Result(FuncTemplate, compiler.CompileError),
+  cont: fn(FuncTemplate) -> #(State, Result(JsValue, JsValue)),
+) -> #(State, Result(JsValue, JsValue)) {
+  let throw_syntax = fn(msg) {
+    let #(heap, err) = common.make_syntax_error(state.heap, builtins, msg)
+    #(State(..state, heap:), Error(err))
+  }
+  case parser.parse(source, parser.Script) {
+    Error(err) -> throw_syntax(parser.parse_error_to_string(err))
+    Ok(program) ->
+      case compile(program) {
+        Error(err) -> throw_syntax(string.inspect(err))
+        Ok(template) -> cont(template)
+      }
+  }
+}
+
 /// Parse + compile + execute source in an isolated global-scope state built
 /// from the current realm. Threads heap/globals/job_queue back to caller.
 /// Shared core for eval_native and function_constructor_native.
@@ -510,77 +518,55 @@ fn run_source_in_current_realm(
   execute_inner: ExecuteInnerFn,
   new_state_fn: NewStateFn,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case parser.parse(source, parser.Script) {
-    Error(err) -> {
-      let #(h, syntax_err) =
-        common.make_syntax_error(
-          state.heap,
-          state.builtins,
-          parser.parse_error_to_string(err),
+  use template <- compile_or_throw(
+    state,
+    state.builtins,
+    source,
+    compiler.compile_repl,
+  )
+  let locals = tuple_array.repeat(JsUndefined, template.local_count)
+  let eval_state =
+    State(
+      ..new_state_fn(
+        template,
+        locals,
+        state.heap,
+        state.builtins,
+        state.global_object,
+        state.lexical_globals,
+        state.const_lexical_globals,
+        state.symbol_descriptions,
+        state.symbol_registry,
+        state.event_loop,
+      ),
+      job_queue: state.job_queue,
+      realms: state.realms,
+      // §19.2.1.1 PerformEval: indirect eval runs in global scope,
+      // so its `this` is the global object.
+      this_binding: JsObject(state.global_object),
+    )
+  case execute_inner(eval_state) {
+    Error(vm_err) ->
+      state.type_error(state, "eval: VM error: " <> string.inspect(vm_err))
+    Ok(#(completion, final_state)) -> {
+      // Thread VM-global state back to caller
+      let state =
+        State(
+          ..state.merge_globals(state, final_state, []),
+          heap: final_state.heap,
+          symbol_descriptions: final_state.symbol_descriptions,
+          symbol_registry: final_state.symbol_registry,
+          realms: final_state.realms,
         )
-      #(State(..state, heap: h), Error(syntax_err))
-    }
-    Ok(program) ->
-      case compiler.compile_repl(program) {
-        Error(err) -> {
-          let #(h, syntax_err) =
-            common.make_syntax_error(
-              state.heap,
-              state.builtins,
-              string.inspect(err),
-            )
-          #(State(..state, heap: h), Error(syntax_err))
-        }
-        Ok(template) -> {
-          let locals = tuple_array.repeat(JsUndefined, template.local_count)
-          let eval_state =
-            State(
-              ..new_state_fn(
-                template,
-                locals,
-                state.heap,
-                state.builtins,
-                state.global_object,
-                state.lexical_globals,
-                state.const_lexical_globals,
-                state.symbol_descriptions,
-                state.symbol_registry,
-                state.event_loop,
-              ),
-              job_queue: state.job_queue,
-              realms: state.realms,
-              // §19.2.1.1 PerformEval: indirect eval runs in global scope,
-              // so its `this` is the global object.
-              this_binding: JsObject(state.global_object),
-            )
-          case execute_inner(eval_state) {
-            Error(vm_err) ->
-              state.type_error(
-                state,
-                "eval: VM error: " <> string.inspect(vm_err),
-              )
-            Ok(#(completion, final_state)) -> {
-              // Thread VM-global state back to caller
-              let state =
-                State(
-                  ..state.merge_globals(state, final_state, []),
-                  heap: final_state.heap,
-                  symbol_descriptions: final_state.symbol_descriptions,
-                  symbol_registry: final_state.symbol_registry,
-                  realms: final_state.realms,
-                )
-              case completion {
-                NormalCompletion(val, _) -> #(state, Ok(val))
-                ThrowCompletion(thrown, _) -> #(state, Error(thrown))
-                YieldCompletion(_, _) ->
-                  state.type_error(state, "eval: unexpected yield")
-                completion.AwaitCompletion(_, _) ->
-                  state.type_error(state, "eval: unexpected await")
-              }
-            }
-          }
-        }
+      case completion {
+        NormalCompletion(val, _) -> #(state, Ok(val))
+        ThrowCompletion(thrown, _) -> #(state, Error(thrown))
+        YieldCompletion(_, _) ->
+          state.type_error(state, "eval: unexpected yield")
+        completion.AwaitCompletion(_, _) ->
+          state.type_error(state, "eval: unexpected await")
       }
+    }
   }
 }
 
@@ -651,105 +637,81 @@ fn run_direct_eval(
   execute_inner: ExecuteInnerFn,
   new_state_fn: NewStateFn,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case parser.parse(source, parser.Script) {
-    Error(err) -> {
-      let #(h, syntax_err) =
-        common.make_syntax_error(
-          state.heap,
-          state.builtins,
-          parser.parse_error_to_string(err),
-        )
-      #(State(..state, heap: h), Error(syntax_err))
+  // Compile with caller's local names as pre-boxed captures. The eval'd
+  // code's slot i corresponds to name_table[i]'s variable.
+  let parent_names = list.map(name_table, fn(pair) { pair.0 })
+  let caller_strict = state.func.is_strict
+  use template <- compile_or_throw(
+    state,
+    state.builtins,
+    source,
+    compiler.compile_eval_direct(_, parent_names, caller_strict),
+  )
+  // Seed locals[0..N-1] with the caller's box refs (pulled from
+  // caller's locals at the indices in name_table). Remaining slots
+  // default to undefined.
+  let caller_box_refs =
+    list.map(name_table, fn(pair) {
+      tuple_array.get(pair.1, state.locals)
+      |> option.unwrap(JsUndefined)
+    })
+  let remaining = template.local_count - list.length(caller_box_refs)
+  let locals =
+    list.append(caller_box_refs, list.repeat(JsUndefined, remaining))
+    |> tuple_array.from_list
+  // Sloppy: `var` declarations land in the caller's eval_env dict.
+  // Allocate lazily so subsequent evals in the same frame share it.
+  // Strict: compile_eval_direct rewrites those vars to locals in the
+  // eval body, so no eval_env needed.
+  let #(h, eval_env) = case caller_strict, state.eval_env {
+    True, _ -> #(state.heap, None)
+    False, Some(ref) -> #(state.heap, Some(ref))
+    False, None -> {
+      let #(h, ref) = heap.alloc(state.heap, value.EvalEnvSlot(dict.new()))
+      #(h, Some(ref))
     }
-    Ok(program) -> {
-      // Compile with caller's local names as pre-boxed captures. The eval'd
-      // code's slot i corresponds to name_table[i]'s variable.
-      let parent_names = list.map(name_table, fn(pair) { pair.0 })
-      let caller_strict = state.func.is_strict
-      case compiler.compile_eval_direct(program, parent_names, caller_strict) {
-        Error(err) -> {
-          let #(h, syntax_err) =
-            common.make_syntax_error(
-              state.heap,
-              state.builtins,
-              string.inspect(err),
-            )
-          #(State(..state, heap: h), Error(syntax_err))
-        }
-        Ok(template) -> {
-          // Seed locals[0..N-1] with the caller's box refs (pulled from
-          // caller's locals at the indices in name_table). Remaining slots
-          // default to undefined.
-          let caller_box_refs =
-            list.map(name_table, fn(pair) {
-              tuple_array.get(pair.1, state.locals)
-              |> option.unwrap(JsUndefined)
-            })
-          let remaining = template.local_count - list.length(caller_box_refs)
-          let locals =
-            list.append(caller_box_refs, list.repeat(JsUndefined, remaining))
-            |> tuple_array.from_list
-          // Sloppy: `var` declarations land in the caller's eval_env dict.
-          // Allocate lazily so subsequent evals in the same frame share it.
-          // Strict: compile_eval_direct rewrites those vars to locals in the
-          // eval body, so no eval_env needed.
-          let #(h, eval_env) = case caller_strict, state.eval_env {
-            True, _ -> #(state.heap, None)
-            False, Some(ref) -> #(state.heap, Some(ref))
-            False, None -> {
-              let #(h, ref) =
-                heap.alloc(state.heap, value.EvalEnvSlot(dict.new()))
-              #(h, Some(ref))
-            }
-          }
-          let eval_state =
-            State(
-              ..new_state_fn(
-                template,
-                locals,
-                h,
-                state.builtins,
-                state.global_object,
-                state.lexical_globals,
-                state.const_lexical_globals,
-                state.symbol_descriptions,
-                state.symbol_registry,
-                state.event_loop,
-              ),
-              job_queue: state.job_queue,
-              realms: state.realms,
-              // Direct eval inherits the caller's `this` (spec §19.2.1.1
-              // step 27.a — the calling context's LexicalEnvironment).
-              this_binding: state.this_binding,
-              eval_env:,
-            )
-          case execute_inner(eval_state) {
-            Error(vm_err) ->
-              state.type_error(
-                state,
-                "eval: VM error: " <> string.inspect(vm_err),
-              )
-            Ok(#(completion, final_state)) -> {
-              let state =
-                State(
-                  ..state.merge_globals(state, final_state, []),
-                  heap: final_state.heap,
-                  symbol_descriptions: final_state.symbol_descriptions,
-                  symbol_registry: final_state.symbol_registry,
-                  realms: final_state.realms,
-                  eval_env:,
-                )
-              case completion {
-                NormalCompletion(val, _) -> #(state, Ok(val))
-                ThrowCompletion(thrown, _) -> #(state, Error(thrown))
-                YieldCompletion(_, _) ->
-                  state.type_error(state, "eval: unexpected yield")
-                completion.AwaitCompletion(_, _) ->
-                  state.type_error(state, "eval: unexpected await")
-              }
-            }
-          }
-        }
+  }
+  let eval_state =
+    State(
+      ..new_state_fn(
+        template,
+        locals,
+        h,
+        state.builtins,
+        state.global_object,
+        state.lexical_globals,
+        state.const_lexical_globals,
+        state.symbol_descriptions,
+        state.symbol_registry,
+        state.event_loop,
+      ),
+      job_queue: state.job_queue,
+      realms: state.realms,
+      // Direct eval inherits the caller's `this` (spec §19.2.1.1
+      // step 27.a — the calling context's LexicalEnvironment).
+      this_binding: state.this_binding,
+      eval_env:,
+    )
+  case execute_inner(eval_state) {
+    Error(vm_err) ->
+      state.type_error(state, "eval: VM error: " <> string.inspect(vm_err))
+    Ok(#(completion, final_state)) -> {
+      let state =
+        State(
+          ..state.merge_globals(state, final_state, []),
+          heap: final_state.heap,
+          symbol_descriptions: final_state.symbol_descriptions,
+          symbol_registry: final_state.symbol_registry,
+          realms: final_state.realms,
+          eval_env:,
+        )
+      case completion {
+        NormalCompletion(val, _) -> #(state, Ok(val))
+        ThrowCompletion(thrown, _) -> #(state, Error(thrown))
+        YieldCompletion(_, _) ->
+          state.type_error(state, "eval: unexpected yield")
+        completion.AwaitCompletion(_, _) ->
+          state.type_error(state, "eval: unexpected await")
       }
     }
   }
@@ -764,7 +726,7 @@ fn coerce_all_to_string(
   case args {
     [] -> Ok(#(list.reverse(acc), state))
     [arg, ..rest] -> {
-      use #(str, state) <- result.try(state.to_string(state, arg))
+      use #(str, state) <- result.try(coerce.js_to_string(state, arg))
       coerce_all_to_string(rest, state, [str, ..acc])
     }
   }

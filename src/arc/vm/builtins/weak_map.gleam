@@ -4,7 +4,7 @@
 /// In this implementation, keys are stored by Ref (object identity).
 /// Not truly weak (GC doesn't collect entries) but API-compatible.
 import arc/vm/builtins/common.{type BuiltinType}
-import arc/vm/builtins/helpers.{first_arg}
+import arc/vm/builtins/helpers.{first_arg_or_undefined}
 import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/state.{type Heap, type State, State}
@@ -97,7 +97,7 @@ fn weak_map_get(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, _ref, state <- require_weak_map(this, state)
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(key_ref) ->
       case dict.get(data, key_ref) {
         Ok(val) -> #(state, Ok(val))
@@ -114,7 +114,7 @@ fn weak_map_set(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, ref, state <- require_weak_map(this, state)
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(key_ref) -> {
       let val = case args {
         [_, v, ..] -> v
@@ -135,7 +135,7 @@ fn weak_map_has(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, _ref, state <- require_weak_map(this, state)
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(key_ref) -> #(state, Ok(value.JsBool(dict.has_key(data, key_ref))))
     _ -> #(state, Ok(value.JsBool(False)))
   }
@@ -148,7 +148,7 @@ fn weak_map_delete(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use data, ref, state <- require_weak_map(this, state)
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(key_ref) -> {
       let had = dict.has_key(data, key_ref)
       let new_data = dict.delete(data, key_ref)

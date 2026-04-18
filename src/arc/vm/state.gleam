@@ -95,7 +95,7 @@ pub type SavedFrame {
 }
 
 /// The internal VM executor state. Public so builtins can receive and return it,
-/// giving them full access to the runtime (including js_to_string for ToPrimitive).
+/// giving them full access to the runtime.
 pub type State {
   State(
     stack: List(JsValue),
@@ -149,10 +149,6 @@ pub type State {
     /// to resolve realm-specific builtins (stored separately from heap to avoid
     /// import cycle between value.gleam and builtins/common.gleam).
     realms: dict.Dict(Ref, Builtins),
-    /// ES2024 ToString — converts any JsValue to a string, including objects
-    /// via ToPrimitive with VM re-entry. Set by the VM executor.
-    js_to_string: fn(State, JsValue) ->
-      Result(#(String, State), #(JsValue, State)),
     /// Re-entrant call mechanism — invoke a JS callable with (this, args).
     /// Returns Ok(result, state) on normal completion, Error(thrown, state) on throw.
     /// Set by the VM executor (wraps run_handler_with_this).
@@ -193,28 +189,6 @@ pub fn merge_globals(
     pending_receivers: child.pending_receivers,
     outstanding: child.outstanding,
   )
-}
-
-/// Call state.js_to_string, handling the function field access.
-pub fn to_string(
-  state: State,
-  val: JsValue,
-) -> Result(#(String, State), #(JsValue, State)) {
-  let f = state.js_to_string
-  f(state, val)
-}
-
-/// Convert a value to string or propagate error. Use with `use` syntax:
-///   use str, state <- state.try_to_string(state, val)
-pub fn try_to_string(
-  state: State,
-  val: JsValue,
-  cont: fn(String, State) -> #(State, Result(b, JsValue)),
-) -> #(State, Result(b, JsValue)) {
-  case to_string(state, val) {
-    Ok(#(str, state)) -> cont(str, state)
-    Error(#(thrown, state)) -> #(state, Error(thrown))
-  }
 }
 
 /// Call state.call_fn (re-entrant JS function call), handling the function field access.

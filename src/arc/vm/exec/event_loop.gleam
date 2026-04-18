@@ -4,13 +4,13 @@
 
 import arc/vm/builtins/arc as builtins_arc
 import arc/vm/builtins/common
+import arc/vm/builtins/helpers
 import arc/vm/builtins/promise as builtins_promise
 import arc/vm/completion.{NormalCompletion, ThrowCompletion, YieldCompletion}
 import arc/vm/heap
 import arc/vm/internal/job_queue
 import arc/vm/internal/tuple_array
 import arc/vm/opcode
-import arc/vm/ops/coerce
 import arc/vm/ops/object
 import arc/vm/state.{
   type Heap, type NativeFnSlot, type State, type StepResult, type VmError, State,
@@ -194,7 +194,7 @@ fn execute_reaction_job(
   resolve: JsValue,
   reject: JsValue,
 ) -> State {
-  case coerce.is_callable_value(state.heap, handler) {
+  case helpers.is_callable(state.heap, handler) {
     False -> {
       // JsUndefined = fulfill pass-through, JsNull = reject pass-through
       let target = case handler {

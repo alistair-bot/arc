@@ -1,5 +1,5 @@
 import arc/engine
-import arc/vm/completion.{NormalCompletion, ThrowCompletion}
+import arc/vm/completion.{NormalCompletion}
 import arc/vm/value.{Finite, JsBool, JsNull, JsNumber, JsString, JsUndefined}
 
 // ----------------------------------------------------------------------------

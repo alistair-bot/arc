@@ -698,6 +698,35 @@ pub fn define_method_property(
   }
 }
 
+/// §10.1.6.3 step 4.b: merge a getter/setter into an existing accessor
+/// descriptor, or build a fresh one if absent / a data property.
+fn merge_accessor(
+  existing: Result(Property, Nil),
+  func: JsValue,
+  kind: opcode.AccessorKind,
+) -> Property {
+  let #(get, set) = case existing {
+    Ok(AccessorProperty(get:, set:, ..)) -> #(get, set)
+    Ok(DataProperty(..)) | Error(Nil) -> #(None, None)
+  }
+  case kind {
+    opcode.Getter ->
+      AccessorProperty(
+        get: Some(func),
+        set:,
+        enumerable: True,
+        configurable: True,
+      )
+    opcode.Setter ->
+      AccessorProperty(
+        get:,
+        set: Some(func),
+        enumerable: True,
+        configurable: True,
+      )
+  }
+}
+
 /// §14.3.9 Runtime Semantics: PropertyDefinitionEvaluation for
 /// MethodDefinition : get PropertyName ( ) { FunctionBody }
 /// and MethodDefinition : set PropertyName ( PropertySetParameterList ) { FunctionBody }
@@ -723,46 +752,8 @@ pub fn define_accessor(
   use slot <- heap.update(heap, ref)
   case slot {
     ObjectSlot(properties:, ..) -> {
-      // §10.1.6.3 step 4.b: Merge with existing accessor if present
-      let existing = dict.get(properties, key)
-      let new_prop = case kind {
-        opcode.Getter ->
-          case existing {
-            Ok(AccessorProperty(set: s, ..)) ->
-              AccessorProperty(
-                get: Some(func),
-                set: s,
-                enumerable: True,
-                configurable: True,
-              )
-            _ ->
-              AccessorProperty(
-                get: Some(func),
-                set: None,
-                enumerable: True,
-                configurable: True,
-              )
-          }
-        opcode.Setter ->
-          case existing {
-            Ok(AccessorProperty(get: g, ..)) ->
-              AccessorProperty(
-                get: g,
-                set: Some(func),
-                enumerable: True,
-                configurable: True,
-              )
-            _ ->
-              AccessorProperty(
-                get: None,
-                set: Some(func),
-                enumerable: True,
-                configurable: True,
-              )
-          }
-      }
-      let new_props = dict.insert(properties, key, new_prop)
-      ObjectSlot(..slot, properties: new_props)
+      let new_prop = merge_accessor(dict.get(properties, key), func, kind)
+      ObjectSlot(..slot, properties: dict.insert(properties, key, new_prop))
     }
     _ -> slot
   }
@@ -780,43 +771,8 @@ pub fn define_symbol_accessor(
   use slot <- heap.update(heap, ref)
   case slot {
     ObjectSlot(symbol_properties:, ..) -> {
-      let existing = list.key_find(symbol_properties, sym)
-      let new_prop = case kind {
-        opcode.Getter ->
-          case existing {
-            Ok(AccessorProperty(set: s, ..)) ->
-              AccessorProperty(
-                get: Some(func),
-                set: s,
-                enumerable: True,
-                configurable: True,
-              )
-            _ ->
-              AccessorProperty(
-                get: Some(func),
-                set: None,
-                enumerable: True,
-                configurable: True,
-              )
-          }
-        opcode.Setter ->
-          case existing {
-            Ok(AccessorProperty(get: g, ..)) ->
-              AccessorProperty(
-                get: g,
-                set: Some(func),
-                enumerable: True,
-                configurable: True,
-              )
-            _ ->
-              AccessorProperty(
-                get: None,
-                set: Some(func),
-                enumerable: True,
-                configurable: True,
-              )
-          }
-      }
+      let new_prop =
+        merge_accessor(list.key_find(symbol_properties, sym), func, kind)
       ObjectSlot(
         ..slot,
         symbol_properties: list.key_set(symbol_properties, sym, new_prop),

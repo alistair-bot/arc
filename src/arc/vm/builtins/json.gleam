@@ -1,6 +1,8 @@
 import arc/vm/builtins/common
+import arc/vm/builtins/helpers
 import arc/vm/heap
 import arc/vm/internal/elements
+import arc/vm/ops/coerce
 import arc/vm/state.{type Heap, type State, State}
 import arc/vm/value.{
   type JsValue, type JsonNativeFn, type Property, type Ref, ArrayObject,
@@ -93,7 +95,7 @@ fn json_parse(
   // Step 1: ToString(text)
   let to_string_result = case args {
     [JsString(s), ..] -> Ok(#(s, state))
-    [other, ..] -> state.to_string(state, other)
+    [other, ..] -> coerce.js_to_string(state, other)
     [] -> Ok(#("undefined", state))
   }
 
@@ -498,10 +500,7 @@ fn json_stringify(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let val = helpers.first_arg_or_undefined(args)
 
   case stringify_value(state.heap, val, set.new()) {
     Ok(Some(s)) -> #(state, Ok(JsString(s)))

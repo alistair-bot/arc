@@ -2,9 +2,9 @@ import arc/vm/heap.{type Heap}
 import arc/vm/internal/elements
 import arc/vm/value.{
   type CallNativeFn, type ExoticKind, type JsValue, type NativeFn,
-  type NativeFnSlot, type Property, type PropertyKey, type Ref, ArrayObject,
-  Call, Dispatch, JsObject, JsString, Named, NativeFunction, ObjectSlot,
-  OrdinaryObject,
+  type NativeFnSlot, type Property, type PropertyKey, type Ref, AccessorProperty,
+  ArrayObject, Call, Dispatch, JsObject, JsString, Named, NativeFunction,
+  ObjectSlot, OrdinaryObject,
 }
 import gleam/dict.{type Dict}
 import gleam/int
@@ -204,6 +204,29 @@ pub fn alloc_methods(
     let #(name, native, arity) = spec
     let #(h, fn_ref) = alloc_native_fn(h, function_proto, native, name, arity)
     #(h, [#(name, value.builtin_property(JsObject(fn_ref))), ..props])
+  })
+}
+
+/// Allocate N getter function objects from specs, returning get-only
+/// AccessorProperty entries (non-enumerable, configurable). Mirrors alloc_methods.
+pub fn alloc_getters(
+  h: Heap(ctx),
+  function_proto: Ref,
+  specs: List(#(String, NativeFn)),
+) -> #(Heap(ctx), List(#(String, Property))) {
+  list.fold(specs, #(h, []), fn(acc, spec) {
+    let #(h, props) = acc
+    let #(name, native) = spec
+    let #(h, fn_ref) =
+      alloc_native_fn(h, function_proto, native, "get " <> name, 0)
+    let prop =
+      AccessorProperty(
+        get: Some(JsObject(fn_ref)),
+        set: None,
+        enumerable: False,
+        configurable: True,
+      )
+    #(h, [#(name, prop), ..props])
   })
 }
 

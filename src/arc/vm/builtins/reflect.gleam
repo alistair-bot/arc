@@ -254,7 +254,7 @@ fn reflect_delete_property(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use ref, rest, state <- require_object(args, state, "deleteProperty")
-  let key_val = helpers.first_arg(rest)
+  let key_val = helpers.first_arg_or_undefined(rest)
   // Step 2: Let key be ? ToPropertyKey(propertyKey).
   case key_val {
     JsSymbol(sym) -> {
@@ -340,7 +340,7 @@ fn reflect_get_own_property_descriptor(
     state,
     "getOwnPropertyDescriptor",
   )
-  let key_val = helpers.first_arg(rest)
+  let key_val = helpers.first_arg_or_undefined(rest)
   let object_proto = state.builtins.object.prototype
   // Step 2: Let key be ? ToPropertyKey(propertyKey).
   use own_prop, state <- state.try_op(case key_val {
@@ -397,7 +397,7 @@ fn reflect_has(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use ref, rest, state <- require_object(args, state, "has")
-  let key_val = helpers.first_arg(rest)
+  let key_val = helpers.first_arg_or_undefined(rest)
   // Step 2: Let key be ? ToPropertyKey(propertyKey).
   case key_val {
     JsSymbol(sym) -> #(
@@ -528,7 +528,7 @@ fn reflect_set_prototype_of(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   use ref, rest, state <- require_object(args, state, "setPrototypeOf")
-  let proto_val = helpers.first_arg(rest)
+  let proto_val = helpers.first_arg_or_undefined(rest)
   // Step 2: If proto is not an Object and proto is not null, throw a TypeError.
   let new_proto = case proto_val {
     JsObject(p) -> Ok(Some(p))

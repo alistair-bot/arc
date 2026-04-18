@@ -44,7 +44,7 @@ pub fn list_at(lst: List(a), idx: Int) -> Option(a) {
 
 /// Get first arg or JsUndefined if the list is empty.
 /// Non-spec utility — JS functions default missing args to undefined.
-pub fn first_arg(args: List(JsValue)) -> JsValue {
+pub fn first_arg_or_undefined(args: List(JsValue)) -> JsValue {
   case args {
     [v, ..] -> v
     [] -> JsUndefined

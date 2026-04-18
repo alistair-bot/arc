@@ -1,5 +1,5 @@
 import arc/vm/builtins/common.{type BuiltinType}
-import arc/vm/builtins/helpers.{first_arg}
+import arc/vm/builtins/helpers.{first_arg_or_undefined}
 import arc/vm/heap
 import arc/vm/internal/elements
 import arc/vm/ops/coerce
@@ -53,7 +53,7 @@ fn try_to_property_key(
     Error(#(thrown, state)) -> #(state, Error(thrown))
     Ok(#(JsSymbol(sym), state)) -> cont(SymbolKey(sym), state)
     Ok(#(prim, state)) -> {
-      use s, state <- state.try_to_string(state, prim)
+      use s, state <- coerce.try_to_string(state, prim)
       cont(StringKey(value.canonical_key(s), s), state)
     }
   }
@@ -464,7 +464,7 @@ pub fn apply_descriptor(
   use #(dkey, state) <- result.try(case key_val {
     JsSymbol(sym) -> Ok(#(SymbolKey(sym), state))
     _ -> {
-      use #(s, state) <- result.map(state.to_string(state, key_val))
+      use #(s, state) <- result.map(coerce.js_to_string(state, key_val))
       #(StringKey(value.canonical_key(s), s), state)
     }
   })
@@ -503,15 +503,7 @@ pub fn apply_descriptor(
   use Nil <- result.try(case desc_get {
     Some(g) ->
       case g != JsUndefined && !helpers.is_callable(state.heap, g) {
-        True -> {
-          let #(h, err) =
-            common.make_type_error(
-              state.heap,
-              state.builtins,
-              "Getter must be a function",
-            )
-          Error(#(err, State(..state, heap: h)))
-        }
+        True -> reject_define(state, "Getter must be a function")
         False -> Ok(Nil)
       }
     _ -> Ok(Nil)
@@ -520,15 +512,7 @@ pub fn apply_descriptor(
   use Nil <- result.try(case desc_set {
     Some(s) ->
       case s != JsUndefined && !helpers.is_callable(state.heap, s) {
-        True -> {
-          let #(h, err) =
-            common.make_type_error(
-              state.heap,
-              state.builtins,
-              "Setter must be a function",
-            )
-          Error(#(err, State(..state, heap: h)))
-        }
+        True -> reject_define(state, "Setter must be a function")
         False -> Ok(Nil)
       }
     _ -> Ok(Nil)
@@ -537,15 +521,11 @@ pub fn apply_descriptor(
   let has_accessor = option.is_some(desc_get) || option.is_some(desc_set)
   let has_data = option.is_some(desc_value) || option.is_some(desc_writable)
   use Nil <- result.try(case has_accessor && has_data {
-    True -> {
-      let #(h, err) =
-        common.make_type_error(
-          state.heap,
-          state.builtins,
-          "Invalid property descriptor. Cannot both specify accessors and a value or writable attribute",
-        )
-      Error(#(err, State(..state, heap: h)))
-    }
+    True ->
+      reject_define(
+        state,
+        "Invalid property descriptor. Cannot both specify accessors and a value or writable attribute",
+      )
     False -> Ok(Nil)
   })
 
@@ -574,15 +554,11 @@ pub fn apply_descriptor(
 
       // §10.1.6.3 step 2: If property doesn't exist and object is not extensible, reject.
       use Nil <- result.try(case existing, extensible {
-        Error(_), False -> {
-          let #(h, err) =
-            common.make_type_error(
-              state.heap,
-              state.builtins,
-              "Cannot define property " <> key <> ", object is not extensible",
-            )
-          Error(#(err, State(..state, heap: h)))
-        }
+        Error(Nil), False ->
+          reject_define(
+            state,
+            "Cannot define property " <> key <> ", object is not extensible",
+          )
         _, _ -> Ok(Nil)
       })
 
@@ -590,10 +566,7 @@ pub fn apply_descriptor(
       // Validate that the change is permitted on non-configurable properties.
       use Nil <- result.try(case existing {
         Ok(existing_prop) -> {
-          let current_configurable = case existing_prop {
-            DataProperty(configurable: c, ..)
-            | AccessorProperty(configurable: c, ..) -> c
-          }
+          let current_configurable = value.prop_configurable(existing_prop)
           case current_configurable {
             True -> Ok(Nil)
             False -> {
@@ -604,10 +577,7 @@ pub fn apply_descriptor(
                 _ -> Ok(Nil)
               })
               // Step 7b: Cannot change enumerable on non-configurable property.
-              let current_enumerable = case existing_prop {
-                DataProperty(enumerable: e, ..)
-                | AccessorProperty(enumerable: e, ..) -> e
-              }
+              let current_enumerable = value.prop_enumerable(existing_prop)
               use Nil <- result.try(case desc_enumerable {
                 Some(e) if e != current_enumerable ->
                   reject_define(state, "Cannot redefine property: " <> key)
@@ -692,6 +662,16 @@ pub fn apply_descriptor(
         _ -> Ok(Nil)
       })
 
+      let enumerable =
+        option.lazy_unwrap(desc_enumerable, fn() {
+          existing |> result.map(value.prop_enumerable) |> result.unwrap(False)
+        })
+      let configurable =
+        option.lazy_unwrap(desc_configurable, fn() {
+          existing
+          |> result.map(value.prop_configurable)
+          |> result.unwrap(False)
+        })
       let new_prop = case is_accessor {
         True -> {
           // Accessor descriptor: merge get/set with existing accessor (if any).
@@ -715,24 +695,6 @@ pub fn apply_descriptor(
               }
             Some(s) -> Some(s)
           }
-          let enumerable = case desc_enumerable {
-            Some(e) -> e
-            _ ->
-              case existing {
-                Ok(DataProperty(enumerable: e, ..))
-                | Ok(AccessorProperty(enumerable: e, ..)) -> e
-                _ -> False
-              }
-          }
-          let configurable = case desc_configurable {
-            Some(c) -> c
-            _ ->
-              case existing {
-                Ok(DataProperty(configurable: c, ..))
-                | Ok(AccessorProperty(configurable: c, ..)) -> c
-                _ -> False
-              }
-          }
           AccessorProperty(get: getter, set: setter, enumerable:, configurable:)
         }
         False -> {
@@ -755,29 +717,11 @@ pub fn apply_descriptor(
                 _ -> False
               }
           }
-          let final_enumerable = case desc_enumerable {
-            Some(e) -> e
-            _ ->
-              case existing {
-                Ok(DataProperty(enumerable: e, ..))
-                | Ok(AccessorProperty(enumerable: e, ..)) -> e
-                _ -> False
-              }
-          }
-          let final_configurable = case desc_configurable {
-            Some(c) -> c
-            _ ->
-              case existing {
-                Ok(DataProperty(configurable: c, ..))
-                | Ok(AccessorProperty(configurable: c, ..)) -> c
-                _ -> False
-              }
-          }
           DataProperty(
             value: final_value,
             writable: final_writable,
-            enumerable: final_enumerable,
-            configurable: final_configurable,
+            enumerable:,
+            configurable:,
           )
         }
       }
@@ -922,7 +866,7 @@ fn own_keys_impl(
   array_proto: Ref,
   enumerable_only: Bool,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(ref) -> {
       // Step 2: Collect own string-keyed properties
       let ks = collect_own_keys(state.heap, ref, enumerable_only)
@@ -1088,10 +1032,7 @@ fn has_own_property(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let key_val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let key_val = first_arg_or_undefined(args)
   // Step 1: Let P be ? ToPropertyKey(V).
   use key, state <- try_to_property_key(state, key_val)
   case this {
@@ -1134,19 +1075,15 @@ fn property_is_enumerable(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let key_val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let key_val = first_arg_or_undefined(args)
   // Step 1: Let P be ? ToPropertyKey(V).
   use key, state <- try_to_property_key(state, key_val)
   case this {
     JsObject(ref) -> {
       // Steps 3-5: [[GetOwnProperty]] → desc.[[Enumerable]] or false.
       let result = case get_own_property_by_key(state.heap, ref, key) {
-        Some(DataProperty(enumerable: e, ..))
-        | Some(AccessorProperty(enumerable: e, ..)) -> JsBool(e)
-        _ -> JsBool(False)
+        Some(p) -> JsBool(value.prop_enumerable(p))
+        None -> JsBool(False)
       }
       #(state, Ok(result))
     }
@@ -1394,7 +1331,7 @@ fn own_values_impl(
   state: State,
   cont: fn(List(JsValue), State) -> #(State, Result(JsValue, JsValue)),
 ) -> #(State, Result(JsValue, JsValue)) {
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(ref) as receiver -> {
       // §7.3.23 step 1: Let ownKeys be ? O.[[OwnPropertyKeys]]()
       // (filtered to enumerable-only string keys)
@@ -1468,7 +1405,7 @@ fn own_entries_impl(
   cont: fn(List(#(String, JsValue)), State) ->
     #(State, Result(JsValue, JsValue)),
 ) -> #(State, Result(JsValue, JsValue)) {
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(ref) as receiver -> {
       // §7.3.23 step 1: ownKeys (filtered to enumerable string keys)
       let ks = collect_own_keys(state.heap, ref, True)
@@ -1991,7 +1928,7 @@ fn get_prototype_of(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     JsObject(ref) -> {
       // Step 2: obj.[[GetPrototypeOf]]() — OrdinaryGetPrototypeOf (§10.1.1.1)
       // Returns O.[[Prototype]] (an Object or null).
@@ -2162,62 +2099,58 @@ fn freeze_prop(prop: value.Property) -> value.Property {
   }
 }
 
-/// Object.freeze ( O ) — ES2024 §20.1.2.6
+/// SetIntegrityLevel ( O, level ) — ES2024 §7.3.16
 ///
-///   1. If O is not an Object, return O.
-///   2. Let status be ? SetIntegrityLevel(O, frozen).
-///   3. If status is false, throw a TypeError exception.
-///   4. Return O.
+/// Shared core of Object.freeze and Object.seal. The `transform` callback
+/// applies the level-specific descriptor change (freeze_prop / seal_prop).
 ///
-/// SetIntegrityLevel ( O, frozen ) — §7.3.16:
 ///   1. Let status be ? O.[[PreventExtensions]]().
-///   2. If status is false, return false.
 ///   3. Let keys be ? O.[[OwnPropertyKeys]]().
-///   4. (sealed branch — skipped for frozen)
-///   5. (frozen branch):
-///   6. For each element k of keys, do
-///      a. Let currentDesc be ? O.[[GetOwnProperty]](k).
-///      b. If currentDesc is not undefined, then
-///         i.  If IsAccessorDescriptor(currentDesc), let desc be {[[Configurable]]: false}.
-///         ii. Else, let desc be {[[Configurable]]: false, [[Writable]]: false}.
-///         iii. Perform ? DefinePropertyOrThrow(O, k, desc).
+///   4-6. For each key, transform its property descriptor.
 ///   7. Return true.
 ///
-/// NOTE: Elements (indexed properties in our dense array) are NOT frozen —
-/// only named and symbol properties. This is a known simplification.
-fn freeze(
+/// NOTE: Elements (dense indexed properties) are NOT transformed — only
+/// named and symbol properties. This is a known simplification.
+fn set_integrity_level(
   args: List(JsValue),
   state: State,
+  transform: fn(value.Property) -> value.Property,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let target = first_arg(args)
+  let target = first_arg_or_undefined(args)
   case target {
     JsObject(ref) -> {
-      // §20.1.2.6 step 2: SetIntegrityLevel(O, frozen)
       let heap = {
         use slot <- heap.update(state.heap, ref)
         case slot {
           ObjectSlot(properties:, symbol_properties:, ..) ->
             ObjectSlot(
               ..slot,
-              // §7.3.16 step 6: freeze each own property descriptor
-              properties: dict.map_values(properties, fn(_, p) {
-                freeze_prop(p)
-              }),
+              properties: dict.map_values(properties, fn(_, p) { transform(p) }),
               symbol_properties: list.map(symbol_properties, fn(pair) {
-                #(pair.0, freeze_prop(pair.1))
+                #(pair.0, transform(pair.1))
               }),
-              // §7.3.16 step 1: O.[[PreventExtensions]]()
               extensible: False,
             )
           _ -> slot
         }
       }
-      // §20.1.2.6 step 4: Return O.
       #(State(..state, heap:), Ok(target))
     }
-    // §20.1.2.6 step 1: If O is not an Object, return O.
+    // §20.1.2.6/§20.1.2.20 step 1: If O is not an Object, return O.
     _ -> #(state, Ok(target))
   }
+}
+
+/// Object.freeze ( O ) — ES2024 §20.1.2.6
+///
+///   1. If O is not an Object, return O.
+///   2. Let status be ? SetIntegrityLevel(O, frozen).
+///   4. Return O.
+fn freeze(
+  args: List(JsValue),
+  state: State,
+) -> #(State, Result(JsValue, JsValue)) {
+  set_integrity_level(args, state, freeze_prop)
 }
 
 /// Object.preventExtensions ( O ) — ES2024 §20.1.2.17
@@ -2236,7 +2169,7 @@ fn prevent_extensions(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let target = first_arg(args)
+  let target = first_arg_or_undefined(args)
   case target {
     JsObject(ref) -> {
       // §20.1.2.17 step 2: O.[[PreventExtensions]]()
@@ -2275,45 +2208,47 @@ fn all_frozen(props: List(value.Property)) -> Bool {
   }
 }
 
+/// TestIntegrityLevel ( O, level ) — ES2024 §7.3.17
+///
+/// Shared core of Object.isFrozen and Object.isSealed. The `check` callback
+/// is the level-specific predicate over property lists (all_frozen / all_sealed).
+///
+///   1. Let extensible be ? IsExtensible(O).
+///   2. If extensible is true, return false.
+///   3-4. For each own property, apply the level check.
+///   5. Return true.
+///
+/// TODO(Deviation): Elements (dense indexed properties) are not checked —
+/// only named and symbol properties. Same simplification as SetIntegrityLevel.
+fn test_integrity_level(
+  args: List(JsValue),
+  state: State,
+  check: fn(List(value.Property)) -> Bool,
+) -> #(State, Result(JsValue, JsValue)) {
+  let result = case first_arg_or_undefined(args) {
+    JsObject(ref) ->
+      case heap.read(state.heap, ref) {
+        Some(ObjectSlot(properties:, symbol_properties:, extensible: False, ..)) ->
+          check(dict.values(properties))
+          && check(list.map(symbol_properties, fn(p) { p.1 }))
+        Some(ObjectSlot(extensible: True, ..)) -> False
+        _ -> False
+      }
+    // §20.1.2.14/§20.1.2.15 step 1: If O is not an Object, return true.
+    _ -> True
+  }
+  #(state, Ok(JsBool(result)))
+}
+
 /// Object.isFrozen ( O ) — ES2024 §20.1.2.14
 ///
 ///   1. If O is not an Object, return true.
 ///   2. Return ? TestIntegrityLevel(O, frozen).
-///
-/// TestIntegrityLevel ( O, frozen ) — §7.3.17:
-///   1. Let extensible be ? IsExtensible(O).
-///   2. If extensible is true, return false.
-///   3. Let keys be ? O.[[OwnPropertyKeys]]().
-///   4. For each element k of keys, do
-///      a. Let currentDesc be ? O.[[GetOwnProperty]](k).
-///      b. If currentDesc is not undefined, then
-///         i.  If IsDataDescriptor(currentDesc) is true, then
-///             1. If currentDesc.[[Writable]] is true, return false.
-///         ii. If currentDesc.[[Configurable]] is true, return false.
-///   5. Return true.
-///
-/// TODO(Deviation): Elements (dense indexed properties) are not checked —
-/// only named and symbol properties. Same simplification as freeze.
 fn is_frozen(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let result = case first_arg(args) {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(properties:, symbol_properties:, extensible: False, ..)) ->
-          // §7.3.17 step 2: extensible is false, proceed to step 4.
-          // §7.3.17 step 4: check each own property descriptor.
-          all_frozen(dict.values(properties))
-          && all_frozen(list.map(symbol_properties, fn(p) { p.1 }))
-        // §7.3.17 step 2: extensible is true → return false.
-        Some(ObjectSlot(extensible: True, ..)) -> False
-        _ -> False
-      }
-    // §20.1.2.14 step 1: If O is not an Object, return true.
-    _ -> True
-  }
-  #(state, Ok(JsBool(result)))
+  test_integrity_level(args, state, all_frozen)
 }
 
 /// Object.isExtensible ( O ) — ES2024 §20.1.2.13
@@ -2330,7 +2265,7 @@ fn is_extensible(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let result = case first_arg(args) {
+  let result = case first_arg_or_undefined(args) {
     JsObject(ref) ->
       // §20.1.2.13 step 2: IsExtensible(O) → O.[[Extensible]]
       case heap.read(state.heap, ref) {
@@ -2347,35 +2282,9 @@ fn is_extensible(
 ///
 ///   1. If O is not an Object, return O.
 ///   2. Let status be ? SetIntegrityLevel(O, sealed).
-///   3. If status is false, throw a TypeError exception.
 ///   4. Return O.
-///
-/// SetIntegrityLevel ( O, sealed ) — §7.3.16:
-///   1. Let status be ? O.[[PreventExtensions]]().
-///   3. For each key in keys, set configurable=false on all own properties.
 fn seal(args: List(JsValue), state: State) -> #(State, Result(JsValue, JsValue)) {
-  let target = first_arg(args)
-  case target {
-    JsObject(ref) -> {
-      let heap = {
-        use slot <- heap.update(state.heap, ref)
-        case slot {
-          ObjectSlot(properties:, symbol_properties:, ..) ->
-            ObjectSlot(
-              ..slot,
-              properties: dict.map_values(properties, fn(_, p) { seal_prop(p) }),
-              symbol_properties: list.map(symbol_properties, fn(pair) {
-                #(pair.0, seal_prop(pair.1))
-              }),
-              extensible: False,
-            )
-          _ -> slot
-        }
-      }
-      #(State(..state, heap:), Ok(target))
-    }
-    _ -> #(state, Ok(target))
-  }
+  set_integrity_level(args, state, seal_prop)
 }
 
 /// Helper for seal — make property non-configurable (but keep writable as-is).
@@ -2392,27 +2301,11 @@ fn seal_prop(prop: value.Property) -> value.Property {
 ///
 ///   1. If O is not an Object, return true.
 ///   2. Return ? TestIntegrityLevel(O, sealed).
-///
-/// TestIntegrityLevel ( O, sealed ) — §7.3.17:
-///   1. If extensible is true, return false.
-///   4. For each property, if configurable is true, return false.
-///   5. Return true.
 fn is_sealed(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let result = case first_arg(args) {
-    JsObject(ref) ->
-      case heap.read(state.heap, ref) {
-        Some(ObjectSlot(properties:, symbol_properties:, extensible: False, ..)) ->
-          all_sealed(dict.values(properties))
-          && all_sealed(list.map(symbol_properties, fn(p) { p.1 }))
-        Some(ObjectSlot(extensible: True, ..)) -> False
-        _ -> False
-      }
-    _ -> True
-  }
-  #(state, Ok(JsBool(result)))
+  test_integrity_level(args, state, all_sealed)
 }
 
 /// Check if all properties are non-configurable (sealed check).
@@ -2449,7 +2342,7 @@ fn from_entries(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let target = first_arg(args)
+  let target = first_arg_or_undefined(args)
   case target {
     // Step 1: RequireObjectCoercible — null/undefined throw TypeError.
     JsNull | JsUndefined -> state.type_error(state, cannot_convert)
@@ -2519,7 +2412,7 @@ fn from_entries_loop(
           )
         _ -> {
           // ToPropertyKey via ToString for non-symbol keys.
-          use key_str, state <- state.try_to_string(state, key_val)
+          use key_str, state <- coerce.try_to_string(state, key_val)
           from_entries_loop(
             rest,
             state,
@@ -2548,7 +2441,7 @@ fn get_own_property_descriptors(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   let object_proto = state.builtins.object.prototype
-  let target = first_arg(args)
+  let target = first_arg_or_undefined(args)
   case target {
     JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     JsObject(ref) -> {
@@ -2603,7 +2496,7 @@ fn get_own_property_symbols(
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
   let array_proto = state.builtins.array.prototype
-  case first_arg(args) {
+  case first_arg_or_undefined(args) {
     // Step 1: ToObject — null/undefined throw TypeError.
     JsNull | JsUndefined -> state.type_error(state, cannot_convert)
     JsObject(ref) -> {
@@ -2629,7 +2522,7 @@ fn is_prototype_of(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let v = first_arg(args)
+  let v = first_arg_or_undefined(args)
   // Step 1: If V is not an Object, return false.
   case v {
     JsObject(v_ref) -> {
@@ -2679,7 +2572,7 @@ fn object_to_locale_string(
       }
     }
     _ -> {
-      use s, state <- state.try_to_string(state, this)
+      use s, state <- coerce.try_to_string(state, this)
       #(state, Ok(JsString(s)))
     }
   }
@@ -2690,7 +2583,7 @@ fn group_by(
   args: List(JsValue),
   state: State,
 ) -> #(State, Result(JsValue, JsValue)) {
-  let items = first_arg(args)
+  let items = first_arg_or_undefined(args)
   let callback = case args {
     [_, cb, ..] -> cb
     _ -> JsUndefined
@@ -2762,7 +2655,7 @@ fn group_by_loop(
         item,
         value.JsNumber(value.Finite(int.to_float(index))),
       ])
-      use key, state <- state.try_to_string(state, key_val)
+      use key, state <- coerce.try_to_string(state, key_val)
       let current = dict.get(groups, key) |> result.unwrap([])
       let groups = dict.insert(groups, key, [item, ..current])
       group_by_loop(state, rest, callback, index + 1, groups)

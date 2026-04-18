@@ -1,4 +1,5 @@
 import arc/vm/builtins/common.{type Builtins}
+import arc/vm/builtins/helpers
 import arc/vm/completion.{
   type Completion, AwaitCompletion, NormalCompletion, ThrowCompletion,
   YieldCompletion,
@@ -43,10 +44,7 @@ pub fn call_native_generator_next(
   execute_inner: ExecuteInnerFn,
   _unwind_to_catch: UnwindToCatchFn,
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
-  let next_arg = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let next_arg = helpers.first_arg_or_undefined(args)
   case get_generator_data(state.heap, this) {
     Some(gen) ->
       case gen.gen_state {
@@ -205,10 +203,7 @@ pub fn call_native_generator_return(
   rest_stack: List(JsValue),
   execute_inner: ExecuteInnerFn,
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
-  let return_val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let return_val = helpers.first_arg_or_undefined(args)
   case get_generator_data(state.heap, this) {
     Some(gen) ->
       case gen.gen_state {
@@ -322,10 +317,7 @@ pub fn call_native_generator_throw(
   execute_inner: ExecuteInnerFn,
   unwind_to_catch: UnwindToCatchFn,
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
-  let throw_val = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let throw_val = helpers.first_arg_or_undefined(args)
   case get_generator_data(state.heap, this) {
     Some(gen) ->
       case gen.gen_state {

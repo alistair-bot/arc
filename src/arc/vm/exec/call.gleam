@@ -3,6 +3,7 @@ import arc/vm/builtins/array as builtins_array
 import arc/vm/builtins/boolean as builtins_boolean
 import arc/vm/builtins/common
 import arc/vm/builtins/error as builtins_error
+import arc/vm/builtins/helpers
 import arc/vm/builtins/json as builtins_json
 import arc/vm/builtins/map as builtins_map
 import arc/vm/builtins/math as builtins_math
@@ -642,10 +643,7 @@ pub fn call_native_async_resume(
   execute_inner: ExecuteInnerFn,
   unwind_to_catch: UnwindToCatchFn,
 ) -> Result(State, #(StepResult, JsValue, Heap)) {
-  let settled_value = case args {
-    [v, ..] -> v
-    [] -> JsUndefined
-  }
+  let settled_value = helpers.first_arg_or_undefined(args)
   case heap.read(state.heap, async_data_ref) {
     Some(AsyncFunctionSlot(
       promise_data_ref:,
@@ -1789,7 +1787,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- state.try_to_string(state, arg)
+      use str, state <- coerce.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_decode(str))))
     }
     value.VmNative(value.EncodeURI) -> {
@@ -1797,7 +1795,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- state.try_to_string(state, arg)
+      use str, state <- coerce.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_encode(str, True))))
     }
     value.VmNative(value.DecodeURIComponent) -> {
@@ -1805,7 +1803,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- state.try_to_string(state, arg)
+      use str, state <- coerce.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_decode(str))))
     }
     value.VmNative(value.EncodeURIComponent) -> {
@@ -1813,7 +1811,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- state.try_to_string(state, arg)
+      use str, state <- coerce.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.uri_encode(str, False))))
     }
     // AnnexB B.2.1.1 escape ( string )
@@ -1822,7 +1820,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- state.try_to_string(state, arg)
+      use str, state <- coerce.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.js_escape(str))))
     }
     // AnnexB B.2.1.2 unescape ( string )
@@ -1831,7 +1829,7 @@ pub fn dispatch_native(
         [s, ..] -> s
         [] -> value.JsUndefined
       }
-      use str, state <- state.try_to_string(state, arg)
+      use str, state <- coerce.try_to_string(state, arg)
       #(state, Ok(value.JsString(operators.js_unescape(str))))
     }
   }
